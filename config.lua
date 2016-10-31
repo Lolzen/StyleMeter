@@ -2,11 +2,15 @@
 ===		Config   	 ===
 ====================]]--
 -- configuration file
+-- to do: split core options and layout options
 
 local addon, ns = ...
 
 --[Settings]--
-ns.initMode = "Damage"				-- Select which mode to display per standard [Damage, Heal, Absorb, Deaths, Dispels, Interrupts]
+ns.modulepriority = {				-- determines the priority order of modules and custom modules
+	["Damage"] = 1,
+	["Heal"] = 2,
+}
 ns.solo_hide = false				-- gathers no data, until in a group or raid [true/false]
 ns.cleanOnGrpChange = false			-- Purge data gathered, from players that left the raid/group [true/false]
 --ns.width = 250
