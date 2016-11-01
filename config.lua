@@ -10,6 +10,7 @@ local addon, ns = ...
 ns.modulepriority = {				-- determines the priority order of modules and custom modules
 	["Damage"] = 1,
 	["Heal"] = 2,
+	["Absorb"] = 3,
 }
 ns.solo_hide = false				-- gathers no data, until in a group or raid [true/false]
 ns.cleanOnGrpChange = false			-- Purge data gathered, from players that left the raid/group [true/false]

@@ -36,6 +36,20 @@ ns.datamodules = {
 			},
 		},
 	},
+	["Absorb"] = {
+		["activated"] = true,
+		["strings"] = {
+			["SWING_MISSED"] = {
+				"arg14", --absorb swing
+			},
+			["RANGE_MISSED"] = {
+				"arg17", --absorb range
+			},
+			["SPELL_MISSED"] = {
+				"arg17", --absorb spell
+			},
+		},
+	},
 }
 
 ns.utilitymodules = {}
