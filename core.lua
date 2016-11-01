@@ -24,9 +24,7 @@ ns.guidDB = {
 function eF:addUnitToDB(unit, owner)
 	local guid = UnitGUID(unit)
 	if not guid or guid == "" then return end
-	--local type, zero, server_id, instance_id, zone_uid, npc_id, spawn_uid = strsplit("-",guid)
 	local unitType = select(1, strsplit("-", guid))
-	--print(unitType)
 	local name, realm = UnitName(unit)
 	if not name or name == "Unknown" then return end
 	
@@ -39,17 +37,16 @@ function eF:addUnitToDB(unit, owner)
 				["name"] = name..realm, 
 				["class"] = class,
 				["classcolor"] = RAID_CLASS_COLORS[class],
-		--		["rank"] = 0,
+				["inRank"] = 0,
 		--		["SMUser"] = 0,
-			--	print(name..realm)
 			}
 		end
+		
 	elseif unitType == "Pet" or unitType == "Vehicle" then
 		if not ns.guidDB.pets[guid] then
 			ns.guidDB.pets[guid] = {
 				["name"] = name, 
 				["owner"] = owner,
-			--	print(name.." "..owner)
 			}
 		end
 	end
@@ -58,8 +55,8 @@ end
 function eF:UpdateWatchedPlayers()
 	-- Delete old table
 	if ns.cleanOnGrpChange == true then	
-		for k in pairs(ns.guidDB) do
-			ns.guidDB[k] = nil
+		for k in pairs(ns.guidDB.players) do
+			ns.guidDB.players[k] = nil
 		end
 	end
  
@@ -94,11 +91,14 @@ function eF:UpdateWatchedPlayers()
 	end
  
 	-- Delete Data of "old" players
-	ns.resetData()
+--	ns.resetData()
 
 	-- Insert player names into rank-table
 	for _, guid in pairs(ns.guidDB.players) do
-		ns.guidDB.rank[#ns.guidDB.rank+1] = guid.name
+		if guid.inRank == 0 then
+			ns.guidDB.rank[#ns.guidDB.rank+1] = guid.name
+			guid.inRank = 1
+		end
 	end
 end
 
@@ -127,11 +127,18 @@ function ns.sortByModule(module, a, b)
 end
 
 function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17)
-	if ns.guidDB.players[arg4] then --check if user exist in guidDB before gathering data
+	-- Check if user exist in guidDB before gathering data
+	if ns.guidDB.players[arg4] then
+--		if string.find(arg2, "_MISSED") then
+--			print("missed "..arg14)
+--		end
 		for module, vars in pairs(ns.datamodules) do
-			if vars["activated"] == true then --check if module is activated
-				for type, args in pairs(vars["strings"]) do --taype = , args = eg arg12
-					if string.find(arg2, type) then --if we find a type
+			-- Check if module is activated
+			if vars["activated"] == true then
+				-- Type = eg "SPELL_DAMAGE_PERIODIC", args = eg arg12
+				for type, args in pairs(vars["strings"]) do
+					-- If we find a type defined from modules
+					if string.find(arg2, type) then
 						local value
 						for _, arg in pairs(args) do
 							if arg == "arg5" then
@@ -164,14 +171,19 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 						end
 						
 						if not ns.moduleDB[module] then
-							ns.moduleDB[module] = {[arg5] = value}
+							ns.moduleDB[module] = {}
 						end
-						ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + value
-						
+						if not ns.moduleDB[module][arg5] then
+							ns.moduleDB[module][arg5] = value
+						else
+							ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + value
+						end
+		
 						if not ns.moduleDBtotal[module] then
 							ns.moduleDBtotal[module] = value
+						else
+							ns.moduleDBtotal[module] = ns.moduleDBtotal[module] + value
 						end
-						ns.moduleDBtotal[module] = ns.moduleDBtotal[module] + value
 
 						if ns.UpdateLayout then
 							ns:UpdateLayout()
@@ -185,12 +197,16 @@ end
 
 -- Resettingfunction (reset all collected data)
 function ns.resetData()
-	for k, v in pairs(ns.moduleDB) do
-		ns.moduleDB[v] = 0
+	for module, _ in pairs(ns.datamodules) do
+		if ns.moduleDB[module] then
+			for k, v in pairs(ns.moduleDB[module]) do
+				ns.moduleDB[module][k] = nil
+			end
+		end
 	end
 	
 	for k, v in pairs(ns.moduleDBtotal) do
-		ns.moduleDBtotal[k] = 0
+		ns.moduleDBtotal[k] = nil
 	end
 
 	if ns.layoutSpecificReset then
@@ -198,10 +214,9 @@ function ns.resetData()
 	end
 	
 	-- Clear rank-table
---	for k, v in ipairs(ns.guidDB.rank) do 
-	--	print(v)
---		ns.guidDB.rank[v] = nil 
---	end
+	for k, v in ipairs(ns.guidDB.rank) do 
+		ns.guidDB.rank[v] = nil
+	end
 end
 
 eF:SetScript("OnEvent", function(self, event, ...)  
