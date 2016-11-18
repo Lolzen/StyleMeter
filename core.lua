@@ -9,7 +9,6 @@ eF:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eF:RegisterEvent("GROUP_ROSTER_UPDATE")
 eF:RegisterEvent("PLAYER_ENTERING_WORLD")
 eF:RegisterEvent("UNIT_PET")
-eF:RegisterEvent("CHAT_MSG_ADDON")
 eF:RegisterEvent("PLAYER_REGEN_DISABLED")
 eF:RegisterEvent("PLAYER_REGEN_ENABLED")
 
@@ -35,7 +34,10 @@ function eF:addUnitToDB(unit, owner)
 		
 		-- Create the player key in ns.DB.players
 		if not ns.DB.players[name..realm] then
-			ns.DB.players[name..realm] = {}
+			ns.DB.players[name..realm] = {
+				["class"] = select(1, UnitClass(name..realm)),
+				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(name..realm))],
+			}
 			-- Insert player names into ns.DB.rank
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
 		end
