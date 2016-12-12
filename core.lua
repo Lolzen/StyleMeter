@@ -12,12 +12,16 @@ eF:RegisterEvent("UNIT_PET")
 eF:RegisterEvent("PLAYER_REGEN_DISABLED")
 eF:RegisterEvent("PLAYER_REGEN_ENABLED")
 
--- Create our Databases
+-- Create our databases
 ns.DB = {
 	players = {},
 	pets = {},
 	rank = {},
 }
+
+-- module (data) & plugin (feature) databases
+ns.module = {}
+ns.plugin = {}
 
 ns.moduleDB = {}
 ns.moduleDBtotal = {}
@@ -42,9 +46,12 @@ function eF:addUnitToDB(unit, owner)
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
 		end
 	elseif unitType == "Pet" or unitType == "Vehicle" then
+		local realm = realm and realm ~= "" and "-"..realm or ""
+		
 		--Create the pet key in ns.DB.pets
-		if not ns.DB.pets[name] then
-			ns.DB.pets[name] = { 
+	--	print("added "..name..realm)
+		if not ns.DB.pets[name..realm] then
+			ns.DB.pets[name..realm] = { 
 				["owner"] = owner,
 			}
 		end
@@ -97,15 +104,7 @@ end
 eF.GROUP_ROSTER_UPDATE = eF.UpdateWatchedPlayers
 eF.UNIT_PET = eF.UpdateWatchedPlayers
 
--- Create the variable "ns.activeModule" and set it to module priority #1
-ns.activeModule = ""
-for k, v in pairs(ns.modulepriority) do
-	if v == 1 then
-		ns.activeModule = k
-	end
-end
-
--- Upon entering the woröd, i.e. after Loading Screen, 
+-- Upon entering the world, i.e. after Loading Screen, 
 -- update the Watched Players and call the update functions for layouts
 function eF.PLAYER_ENTERING_WORLD()
 	eF:UpdateWatchedPlayers()
@@ -135,20 +134,16 @@ function eF.PLAYER_REGEN_ENABLED()
 end
 
 ns.startCombatTime = 0
---ns.currentCombatTime = 0
 ns.totalCombatTime = 0
 function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17)
---	ns.curCombatTime = ns.combatTotalTime
---	ns.combatTime = ns.totalCombatTime + (ns.startCombatTime and (GetTime() - ns.startCombatTime) or 0)
 	-- Check if user exist in DB before gathering data
-	if not ns.DB.players[arg5] then return end
-	for module, vars in pairs(ns.datamodules) do
-		-- Check if module is activated
-		if vars["activated"] == true then
-			-- Type = eg "SPELL_DAMAGE_PERIODIC", args = eg arg12
-			for type, args in pairs(vars["strings"]) do
-				-- If we find a type defined from modules
-				if string.find(arg2, type) then
+	if ns.DB.players[arg5] or ns.DB.pets[arg5] then
+	for module, vars in pairs(ns.module) do
+		if vars["strings"] then
+			-- eventType = eg "SPELL_DAMAGE_PERIODIC", args = eg arg12
+			for eventType, args in pairs(vars["strings"]) do
+				-- If we find a eventType defined from modules
+				if string.find(arg2, eventType) then
 					-- Return the arguments defined from modules to determine the right value
 					local value
 					for _, arg in pairs(args) do
@@ -179,17 +174,30 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 						end
 					end
 
-					if value == -1 or nil then
+					if value == -1 or value == nil then
 						value = 0
 					end
-						-- add values to DB
-					if not ns.moduleDB[module] then
-					ns.moduleDB[module] = {}
-					end
-					if not ns.moduleDB[module][arg5] then
-						ns.moduleDB[module][arg5] = value
-					else
-						ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
+
+					-- add values to DB
+					if ns.DB.players[arg5] then
+						if not ns.moduleDB[module] then
+							ns.moduleDB[module] = {}
+						end
+						if not ns.moduleDB[module][arg5] then
+							ns.moduleDB[module][arg5] = value
+						else
+							ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
+						end
+					elseif ns.DB.pets[arg5] then
+						--pets
+						if not ns.moduleDB[module] then
+							ns.moduleDB[module] = {}
+						end
+						if not ns.moduleDB[module][ns.DB.pets[arg5].owner] then
+							ns.moduleDB[module][ns.DB.pets[arg5].owner] = value
+						else
+							ns.moduleDB[module][ns.DB.pets[arg5].owner] = ns.moduleDB[module][ns.DB.pets[arg5].owner] + (value or 0)
+						end
 					end
 
 					if not ns.moduleDBtotal[module] then
@@ -205,6 +213,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 				end
 			end
 		end
+	end
 	end
 end
 
@@ -232,6 +241,46 @@ function ns.resetData()
 	-- Also let the layout reset things, if the function axists
 	if ns.layoutSpecificReset then
 		ns.layoutSpecificReset()
+	end
+end
+
+-- Slashcommands to report data
+local channel, wname
+local paste = function(self)
+	SendChatMessage("StyleMeter report for : ["..ns.activeModule.."]", channel, nil, wname)
+	for i=1, 5, 1 do
+		local curModeVal = ns.moduleDB[ns.activeModule][ns.DB.rank[i]] or 0
+		if i and ns.moduleDB[ns.activeModule][ns.DB.rank[i]] then
+			SendChatMessage(string.format("%d. %s: %d (%.0f%%) [%s]", i, ns.DB.rank[i], curModeVal, curModeVal / ns.moduleDBtotal[ns.activeModule] * 100, ns.DB.players[ns.DB.rank[i]].class), channel, nil, wname)
+		end
+	end
+end
+
+SLASH_STYLEMETER1 = "/sm"
+SlashCmdList["STYLEMETER"] = function(cmd)
+	local variable, name = cmd:match("^(%S*)%s*(.-)$") 
+	variable = string.lower(variable)
+	if variable and variable == "s" then
+		channel = "SAY"
+		paste()
+	elseif variable and variable == "p" then
+		channel = "PARTY"
+		paste()
+	elseif variable and variable == "g" then
+		channel = "GUILD"
+		paste()
+	elseif variable and variable == "ra" then
+		channel = "RAID"
+		paste()
+		elseif variable and variable == "i" then
+		channel = "INSTANCE"
+		paste()
+	elseif variable == "w" and name ~= "" then
+		channel = "WHISPER"
+		wname = name
+		paste()
+	else
+		ChatFrame1:AddMessage("|cff5599ffStyleMeter:|r Valid commands: s/p/i/g/ra/w [name]")
 	end
 end
 
