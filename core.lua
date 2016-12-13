@@ -219,7 +219,7 @@ end
 
 -- Resettingfunction (reset all collected data)
 function ns.resetData()
-	for module, _ in pairs(ns.datamodules) do
+	for module, _ in pairs(ns.module) do
 		if ns.moduleDB[module] then
 			for k, v in pairs(ns.moduleDB[module]) do
 				ns.moduleDB[module][k] = nil
