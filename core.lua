@@ -49,7 +49,6 @@ function eF:addUnitToDB(unit, owner)
 		local realm = realm and realm ~= "" and "-"..realm or ""
 		
 		--Create the pet key in ns.DB.pets
-	--	print("added "..name..realm)
 		if not ns.DB.pets[name..realm] then
 			ns.DB.pets[name..realm] = { 
 				["owner"] = owner,
@@ -95,9 +94,6 @@ function eF:UpdateWatchedPlayers()
 			end
 		end
 	end
- 
-	-- Delete Data of "old" players
---	ns.resetData()
 end
 
 -- Upate on certain events
@@ -116,10 +112,24 @@ function eF.PLAYER_ENTERING_WORLD()
 	end
 end
 
---Sortfunction; sort the rank table after highes values on top for the viewed/active module
+-- Sortfunction; sort the rank table after highes values on top for the viewed/active module
 function ns.sortByModule(a, b)
 	if ns.moduleDBtotal[ns.activeModule] and ns.moduleDBtotal[ns.activeModule] > 0 then
 		return (ns.moduleDB[ns.activeModule][a] or 0) > (ns.moduleDB[ns.activeModule][b] or 0)
+	end
+end
+
+-- Sortfunction for the spells/abilities in ns.moduleDB[module][arg5][spellName]
+function ns.sortSpellsByValue(a, b)
+	if ns.moduleDBtotal[ns.activeModule] and ns.moduleDBtotal[ns.activeModule] > 0 then
+		for _, name in pairs(ns.moduleDB[ns.activeModule]) do
+			return (name[a] or 0) > (name[b] or 0)
+	--		for spellName, value in pairs(name) do
+				--k = mind blast, v = value
+				--print(b)
+	--			return value[a] > value[b]
+	--		end
+		end
 	end
 end
 
@@ -178,25 +188,50 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 						value = 0
 					end
 
+					-- as SWING and SPELL have different arguments, on auto attacks arg13 is a number value,
+					-- otherwise we can be sure it is our desired spell/ability string. Therefore Let's check that.
+					local spellName
+					if type(arg13) == "string" then
+						spellName = arg13
+					else
+						spellName = "Auto Attack"
+					end
+
 					-- add values to DB
 					if ns.DB.players[arg5] then
 						if not ns.moduleDB[module] then
 							ns.moduleDB[module] = {}
 						end
 						if not ns.moduleDB[module][arg5] then
-							ns.moduleDB[module][arg5] = value
+							ns.moduleDB[module][arg5] = {
+								["total"] = value,
+							}
 						else
-							ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
+							ns.moduleDB[module][arg5].total = ns.moduleDB[module][arg5].total + (value or 0)
+						end
+						-- track the individual spell or ability numbers too
+						if not ns.moduleDB[module][arg5][spellName] then
+							ns.moduleDB[module][arg5][spellName] = value
+						else
+							ns.moduleDB[module][arg5][spellName] = ns.moduleDB[module][arg5][spellName] + (value or 0)
 						end
 					elseif ns.DB.pets[arg5] then
-						--pets
+						-- pets or tempPets
 						if not ns.moduleDB[module] then
 							ns.moduleDB[module] = {}
 						end
 						if not ns.moduleDB[module][ns.DB.pets[arg5].owner] then
-							ns.moduleDB[module][ns.DB.pets[arg5].owner] = value
+							ns.moduleDB[module][ns.DB.pets[arg5].owner] = {
+								["total"] = value,
+							}
 						else
-							ns.moduleDB[module][ns.DB.pets[arg5].owner] = ns.moduleDB[module][ns.DB.pets[arg5].owner] + (value or 0)
+							ns.moduleDB[module][ns.DB.pets[arg5].owner].total = ns.moduleDB[module][ns.DB.pets[arg5].owner].total + (value or 0)
+						end
+						-- track the pets as spell in the overviel
+						if not ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] then
+							ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] = value
+						else
+							ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] = ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] + (value or 0)
 						end
 					end
 
@@ -209,6 +244,13 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 					-- Update the layout
 					if ns.UpdateLayout then
 						ns:UpdateLayout()
+					end
+				elseif string.find(arg2, "SPELL_SUMMON") then
+					--Create the tempPet key in ns.DB.pets
+					if not ns.DB.pets[arg9] then
+						ns.DB.pets[arg9] = { 
+							["owner"] = arg5,
+						}
 					end
 				end
 			end
