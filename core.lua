@@ -17,6 +17,7 @@ ns.DB = {
 	players = {},
 	pets = {},
 	rank = {},
+	spells = {},
 }
 
 -- module (data) & plugin (feature) databases
@@ -32,26 +33,30 @@ function eF:addUnitToDB(unit, owner)
 	local unitType = select(1, strsplit("-", guid))
 	local name, realm = UnitName(unit)
 	if not name or name == "Unknown" then return end
-	
+
 	if unitType == "Player" then
 		local realm = realm and realm ~= "" and "-"..realm or ""
-		
+
 		-- Create the player key in ns.DB.players
 		if not ns.DB.players[name..realm] then
 			ns.DB.players[name..realm] = {
 				["class"] = select(1, UnitClass(unit)),
 				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(unit))],
+				["guid"] = guid, 
 			}
 			-- Insert player names into ns.DB.rank
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
 		end
 	elseif unitType == "Pet" or unitType == "Vehicle" then
 		local realm = realm and realm ~= "" and "-"..realm or ""
-		
-		--Create the pet key in ns.DB.pets
-		if not ns.DB.pets[name..realm] then
-			ns.DB.pets[name..realm] = { 
+		local ownerguid = UnitGUID(owner) or ""
+
+		-- Create the pet key in ns.DB.pets
+		if not ns.DB.pets[guid] then
+			ns.DB.pets[guid] = { 
+				["name"] = name..realm,
 				["owner"] = owner,
+				["ownerguid"] = ownerguid,
 			}
 		end
 	end
@@ -64,7 +69,7 @@ function eF:UpdateWatchedPlayers()
 			ns.DB.players[k] = nil
 		end
 	end
- 
+
 	-- Insert player name
 	eF:addUnitToDB("player")
 
@@ -72,7 +77,7 @@ function eF:UpdateWatchedPlayers()
 	if UnitExists("playerpet") then
 		eF:addUnitToDB("playerpet", UnitName("player"))
 	end
- 
+
 	-- Insert party members & pets
 	local isInGroup = IsInGroup("player")
 	if isInGroup then
@@ -119,37 +124,24 @@ function ns.sortByModule(a, b)
 	end
 end
 
--- Sortfunction for the spells/abilities in ns.moduleDB[module][arg5][spellName]
-function ns.sortSpellsByValue(a, b)
-	if ns.moduleDBtotal[ns.activeModule] and ns.moduleDBtotal[ns.activeModule] > 0 then
-		for _, name in pairs(ns.moduleDB[ns.activeModule]) do
-			return (name[a] or 0) > (name[b] or 0)
-	--		for spellName, value in pairs(name) do
-				--k = mind blast, v = value
-				--print(b)
-	--			return value[a] > value[b]
-	--		end
-		end
-	end
-end
-
 -- Combat time tracking for * per second calculation
 function eF.PLAYER_REGEN_DISABLED()
 	ns.startCombatTime = GetTime()
+	ns.currentCombatTime = GetTime()
 end
 
 function eF.PLAYER_REGEN_ENABLED()
 	ns.totalCombatTime = ns.totalCombatTime + GetTime() - ns.startCombatTime
 	ns.startCombatTime = nil
+	ns.currentCombatTime = 0
 end
 
 ns.startCombatTime = 0
 ns.totalCombatTime = 0
 function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17)
 	-- Check if user exist in DB before gathering data
-	if ns.DB.players[arg5] or ns.DB.pets[arg5] then
-	for module, vars in pairs(ns.module) do
-		if vars["strings"] then
+	if ns.DB.players[arg5] or ns.DB.pets[arg4] then
+		for module, vars in pairs(ns.module) do
 			-- eventType = eg "SPELL_DAMAGE_PERIODIC", args = eg arg12
 			for eventType, args in pairs(vars["strings"]) do
 				-- If we find a eventType defined from modules
@@ -199,39 +191,36 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 
 					-- add values to DB
 					if ns.DB.players[arg5] then
-						if not ns.moduleDB[module] then
-							ns.moduleDB[module] = {}
-						end
+						-- Players
 						if not ns.moduleDB[module][arg5] then
-							ns.moduleDB[module][arg5] = {
-								["total"] = value,
-							}
+							ns.moduleDB[module][arg5] = value
 						else
-							ns.moduleDB[module][arg5].total = ns.moduleDB[module][arg5].total + (value or 0)
+							ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
 						end
 						-- track the individual spell or ability numbers too
-						if not ns.moduleDB[module][arg5][spellName] then
-							ns.moduleDB[module][arg5][spellName] = value
-						else
-							ns.moduleDB[module][arg5][spellName] = ns.moduleDB[module][arg5][spellName] + (value or 0)
+						if not ns.DB.spells[module][arg5] then
+							ns.DB.spells[module][arg5] = {}
 						end
-					elseif ns.DB.pets[arg5] then
-						-- pets or tempPets
-						if not ns.moduleDB[module] then
-							ns.moduleDB[module] = {}
-						end
-						if not ns.moduleDB[module][ns.DB.pets[arg5].owner] then
-							ns.moduleDB[module][ns.DB.pets[arg5].owner] = {
-								["total"] = value,
-							}
+						if not ns.DB.spells[module][arg5][spellName] then
+							ns.DB.spells[module][arg5][spellName] = value
 						else
-							ns.moduleDB[module][ns.DB.pets[arg5].owner].total = ns.moduleDB[module][ns.DB.pets[arg5].owner].total + (value or 0)
+							ns.DB.spells[module][arg5][spellName] = ns.DB.spells[module][arg5][spellName] + (value or 0)
 						end
-						-- track the pets as spell in the overviel
-						if not ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] then
-							ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] = value
+					elseif ns.DB.pets[arg4] then
+						-- Pets
+						if not ns.moduleDB[module][ns.DB.pets[arg4].owner] then
+							ns.moduleDB[module][ns.DB.pets[arg4].owner] = value
 						else
-							ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] = ns.moduleDB[module][ns.DB.pets[arg5].owner][arg5] + (value or 0)
+							ns.moduleDB[module][ns.DB.pets[arg4].owner] = ns.moduleDB[module][ns.DB.pets[arg4].owner] + (value or 0)
+						end
+						-- track the pets as spell in the overview
+						if not ns.DB.spells[module][ns.DB.pets[arg4].owner] then
+							ns.DB.spells[module][ns.DB.pets[arg4].owner] = {}
+						end
+						if not ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] then
+							ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = value
+						else
+							ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] + (value or 0)
 						end
 					end
 
@@ -246,16 +235,18 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4
 						ns:UpdateLayout()
 					end
 				elseif string.find(arg2, "SPELL_SUMMON") then
-					--Create the tempPet key in ns.DB.pets
-					if not ns.DB.pets[arg9] then
-						ns.DB.pets[arg9] = { 
+				--	eF:addUnitToDB(arg9, arg5)
+					--Create the pet key in ns.DB.pets
+					if not ns.DB.pets[arg8] then
+						ns.DB.pets[arg8] = {
+							["name"] = arg9,
 							["owner"] = arg5,
+							["ownerguid"] = arg4,
 						}
 					end
 				end
 			end
 		end
-	end
 	end
 end
 
@@ -267,19 +258,24 @@ function ns.resetData()
 				ns.moduleDB[module][k] = nil
 			end
 		end
+		if ns.DB.spells[module] then
+		for k, v in pairs(ns.DB.spells[module]) do
+				ns.DB.spells[module][k] = nil
+			end
+		end
 	end
-	
+
 	for k, v in pairs(ns.moduleDBtotal) do
 		ns.moduleDBtotal[k] = nil
 	end
-	
+
 	-- Clear rank-table
 	for k, v in ipairs(ns.DB.rank) do 
 		ns.DB.rank[v] = nil
 	end
-	
+
 	ns.totalCombatTime = 0
-	
+
 	-- Also let the layout reset things, if the function axists
 	if ns.layoutSpecificReset then
 		ns.layoutSpecificReset()
