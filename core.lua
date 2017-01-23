@@ -9,8 +9,6 @@ eF:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eF:RegisterEvent("GROUP_ROSTER_UPDATE")
 eF:RegisterEvent("PLAYER_ENTERING_WORLD")
 eF:RegisterEvent("UNIT_PET")
-eF:RegisterEvent("PLAYER_REGEN_DISABLED")
-eF:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 -- Create our databases
 ns.DB = {
@@ -43,18 +41,21 @@ function eF:addUnitToDB(unit, owner)
 				["class"] = select(1, UnitClass(unit)),
 				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(unit))],
 				["guid"] = guid, 
+				["combatTime"] = 0,
+				["amount"] = 0,
+				["previous_timestamp"] = 0,
 			}
 			-- Insert player names into ns.DB.rank
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
 		end
-	elseif unitType == "Pet" or unitType == "Vehicle" then
+	elseif unitType == "Pet" or unitType == "Creature" then
 		local realm = realm and realm ~= "" and "-"..realm or ""
 		local ownerguid = UnitGUID(owner) or ""
 
 		-- Create the pet key in ns.DB.pets
 		if not ns.DB.pets[guid] then
 			ns.DB.pets[guid] = { 
-				["name"] = name..realm,
+				["name"] = name,
 				["owner"] = owner,
 				["ownerguid"] = ownerguid,
 			}
@@ -63,13 +64,6 @@ function eF:addUnitToDB(unit, owner)
 end
  
 function eF:UpdateWatchedPlayers()
-	-- Delete old table
-	if ns.cleanOnGrpChange == true then	
-		for k in pairs(ns.DB.players) do
-			ns.DB.players[k] = nil
-		end
-	end
-
 	-- Insert player name
 	eF:addUnitToDB("player")
 
@@ -124,118 +118,93 @@ function ns.sortByModule(a, b)
 	end
 end
 
--- Combat time tracking for * per second calculation
-function eF.PLAYER_REGEN_DISABLED()
-	ns.startCombatTime = GetTime()
-	ns.currentCombatTime = GetTime()
-end
-
-function eF.PLAYER_REGEN_ENABLED()
-	ns.totalCombatTime = ns.totalCombatTime + GetTime() - ns.startCombatTime
-	ns.startCombatTime = nil
-	ns.currentCombatTime = 0
-end
-
-ns.startCombatTime = 0
-ns.totalCombatTime = 0
-function eF.COMBAT_LOG_EVENT_UNFILTERED(timestamp, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17)
+function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, ...)
 	-- Check if user exist in DB before gathering data
 	if ns.DB.players[arg5] or ns.DB.pets[arg4] then
+		local unitType = select(1, strsplit("-", arg4))
 		for module, vars in pairs(ns.module) do
 			-- eventType = eg "SPELL_DAMAGE_PERIODIC", args = eg arg12
 			for eventType, args in pairs(vars["strings"]) do
 				-- If we find a eventType defined from modules
 				if string.find(arg2, eventType) then
 					-- Return the arguments defined from modules to determine the right value
-					local value
-					for _, arg in pairs(args) do
-						if arg == "arg6" then
-							value = arg6
-						elseif arg == "arg7" then
-							value = arg7
-						elseif arg == "arg8" then
-							value = arg8
-						elseif arg == "arg9" then
-							value = arg9
-						elseif arg == "arg10" then
-							value = arg10
-						elseif arg == "arg11" then
-							value = arg11
-						elseif arg == "arg12" then
-							value = arg12
-						elseif arg == "arg13" then
-							value = arg13
-						elseif arg == "arg14" then
-							value = arg14
-						elseif arg == "arg15" then
-							value = arg15
-						elseif arg == "arg16" then
-							value = arg16
-						elseif arg == "arg17" then
-							value = arg17
+					for _, argument in pairs(args) do
+						-- Every argument after arg9 would be arg1, arg2 [...] if we use select('#', ...) therefore, 
+						-- just substract the 9 args we have used before, so we get the actual argument.
+						-- this is still not the perfect solution as the actual 9 arguments between [event] and [...] are not
+						-- accessable from plugins, which is not the goal, but it's a start.
+						local value = select(string.match(argument, "arg(%d+)") -9, ...)
+
+						if type(value) ~= "string" then
+							if value == -1 or value == nil then
+								value = 0
+							end
 						end
-					end
 
-					if value == -1 or value == nil then
-						value = 0
-					end
-
-					-- as SWING and SPELL have different arguments, on auto attacks arg13 is a number value,
-					-- otherwise we can be sure it is our desired spell/ability string. Therefore Let's check that.
-					local spellName
-					if type(arg13) == "string" then
-						spellName = arg13
-					else
-						spellName = "Auto Attack"
-					end
-
-					-- add values to DB
-					if ns.DB.players[arg5] then
-						-- Players
-						if not ns.moduleDB[module][arg5] then
-							ns.moduleDB[module][arg5] = value
+						-- as SWING and SPELL have different arguments, on auto attacks arg13 (#4 after starting counting from ...) is a number value,
+						-- otherwise we can be sure it is our desired spell/ability string. Therefore Let's check that.
+						local spellName
+						if type(select(4, ...)) == "string" then
+							spellName = select(4, ...)
 						else
-							ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
+							spellName = "Auto Attack"
 						end
-						-- track the individual spell or ability numbers too
-						if not ns.DB.spells[module][arg5] then
-							ns.DB.spells[module][arg5] = {}
-						end
-						if not ns.DB.spells[module][arg5][spellName] then
-							ns.DB.spells[module][arg5][spellName] = value
-						else
-							ns.DB.spells[module][arg5][spellName] = ns.DB.spells[module][arg5][spellName] + (value or 0)
-						end
-					elseif ns.DB.pets[arg4] then
-						-- Pets
-						if not ns.moduleDB[module][ns.DB.pets[arg4].owner] then
-							ns.moduleDB[module][ns.DB.pets[arg4].owner] = value
-						else
-							ns.moduleDB[module][ns.DB.pets[arg4].owner] = ns.moduleDB[module][ns.DB.pets[arg4].owner] + (value or 0)
-						end
-						-- track the pets as spell in the overview
-						if not ns.DB.spells[module][ns.DB.pets[arg4].owner] then
-							ns.DB.spells[module][ns.DB.pets[arg4].owner] = {}
-						end
-						if not ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] then
-							ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = value
-						else
-							ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] + (value or 0)
-						end
-					end
 
-					if not ns.moduleDBtotal[module] then
-						ns.moduleDBtotal[module] = value
-					else
-						ns.moduleDBtotal[module] = ns.moduleDBtotal[module] + (value or 0)
-					end
+						-- add values to DB
+						if unitType == "Player" then
+							-- Players
+							if not ns.moduleDB[module][arg5] then
+								ns.moduleDB[module][arg5] = value
+							else
+								ns.moduleDB[module][arg5] = ns.moduleDB[module][arg5] + (value or 0)
+							end
+							-- track the individual spell or ability numbers too
+							if not ns.DB.spells[module][arg5] then
+								ns.DB.spells[module][arg5] = {}
+							end
+							if not ns.DB.spells[module][arg5][spellName] then
+								ns.DB.spells[module][arg5][spellName] = value
+							else
+								ns.DB.spells[module][arg5][spellName] = ns.DB.spells[module][arg5][spellName] + (value or 0)
+							end
+							-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
+							ns.DB.players[arg5].amount = arg1 - (ns.DB.players[arg5].previous_timestamp or 0)
+							if ns.DB.players[arg5].amount < 3.5 then
+								ns.DB.players[arg5].combatTime = ns.DB.players[arg5].combatTime + (ns.DB.players[arg5].amount or 0)
+							else
+								ns.DB.players[arg5].combatTime = ns.DB.players[arg5].combatTime + 3.5
+							end
+							ns.DB.players[arg5].previous_timestamp = arg1
+						elseif unitType == "Pet" or unitType == "Creature" then
+							-- Pets
+							if not ns.moduleDB[module][ns.DB.pets[arg4].owner] then
+								ns.moduleDB[module][ns.DB.pets[arg4].owner] = value
+							else
+								ns.moduleDB[module][ns.DB.pets[arg4].owner] = ns.moduleDB[module][ns.DB.pets[arg4].owner] + (value or 0)
+							end
+							-- track the pets as spell in the overview
+							if not ns.DB.spells[module][ns.DB.pets[arg4].owner] then
+								ns.DB.spells[module][ns.DB.pets[arg4].owner] = {}
+							end
+							if not ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] then
+								ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = value
+							else
+								ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] = ns.DB.spells[module][ns.DB.pets[arg4].owner][arg5] + (value or 0)
+							end
+						end
 
-					-- Update the layout
-					if ns.UpdateLayout then
-						ns:UpdateLayout()
+						if not ns.moduleDBtotal[module] then
+							ns.moduleDBtotal[module] = value
+						else
+							ns.moduleDBtotal[module] = ns.moduleDBtotal[module] + (value or 0)
+						end
+
+						-- Update the layout
+						if ns.UpdateLayout then
+							ns:UpdateLayout()
+						end
 					end
 				elseif string.find(arg2, "SPELL_SUMMON") then
-				--	eF:addUnitToDB(arg9, arg5)
 					--Create the pet key in ns.DB.pets
 					if not ns.DB.pets[arg8] then
 						ns.DB.pets[arg8] = {
@@ -274,9 +243,12 @@ function ns.resetData()
 		ns.DB.rank[v] = nil
 	end
 
-	ns.totalCombatTime = 0
+	-- Reset the combatTime
+	for name, v in pairs(ns.DB.players) do
+		ns.DB.players[name].combatTime = 0
+	end
 
-	-- Also let the layout reset things, if the function axists
+	-- Also let the layout reset things, if the function exists
 	if ns.layoutSpecificReset then
 		ns.layoutSpecificReset()
 	end
