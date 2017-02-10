@@ -5,3 +5,4 @@
 ## Version: 0.0.1 Alpha
 
 core.lua
+panel.lua
