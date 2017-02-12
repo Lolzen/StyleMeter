@@ -22,8 +22,7 @@ ns.DB = {
 ns.module = {}
 ns.plugin = {}
 
-ns.moduleDB = {}
-ns.moduleDBtotal = {}
+ns.moduleDB, ns.moduleDBtotal = {}, {}
 
 function eF:addUnitToDB(unit, owner)
 	local guid = UnitGUID(unit)
@@ -41,12 +40,19 @@ function eF:addUnitToDB(unit, owner)
 				["class"] = select(1, UnitClass(unit)),
 				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(unit))],
 				["guid"] = guid, 
-				["combatTime"] = 0,
-				["amount"] = 0,
-				["previous_timestamp"] = 0,
 			}
 			-- Insert player names into ns.DB.rank
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
+			-- Keep track of differen per second calculation values per module
+			for module in pairs(ns.module) do
+				if not ns.DB.players[name..realm][module] then
+					ns.DB.players[name..realm][module] = {
+						["combatTime"] = 0,
+						["amount"] = 0,
+						["previous_timestamp"] = 0,
+					}
+				end
+			end
 		end
 	elseif unitType == "Pet" or unitType == "Creature" then
 		local realm = realm and realm ~= "" and "-"..realm or ""
@@ -111,13 +117,6 @@ function eF.PLAYER_ENTERING_WORLD()
 	end
 end
 
--- Sortfunction; sort the rank table after highes values on top for the viewed/active module
-function ns.sortByModule(a, b)
-	if ns.moduleDBtotal[ns.activeModule] and ns.moduleDBtotal[ns.activeModule] > 0 then
-		return (ns.moduleDB[ns.activeModule][a] or 0) > (ns.moduleDB[ns.activeModule][b] or 0)
-	end
-end
-
 function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = ...
 	-- Check if user exist in DB before gathering data
@@ -158,13 +157,13 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							ns.DB.spells[module][sourceName][spellName] = ns.DB.spells[module][sourceName][spellName] + amount
 						end
 						-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
-						ns.DB.players[sourceName].amount = timeStamp - ns.DB.players[sourceName].previous_timestamp
-						if ns.DB.players[sourceName].amount < 3.5 then
-							ns.DB.players[sourceName].combatTime = ns.DB.players[sourceName].combatTime + ns.DB.players[sourceName].amount
+						ns.DB.players[sourceName][module].amount = timeStamp - ns.DB.players[sourceName][module].previous_timestamp
+						if ns.DB.players[sourceName][module].amount < 3.5 then
+							ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + ns.DB.players[sourceName][module].amount
 						else
-							ns.DB.players[sourceName].combatTime = ns.DB.players[sourceName].combatTime + 3.5
+							ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + 3.5
 						end
-						ns.DB.players[sourceName].previous_timestamp = timeStamp
+						ns.DB.players[sourceName][module].previous_timestamp = timeStamp
 					elseif unitType == "Pet" or unitType == "Creature" then
 						-- Pets
 						if not ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] then
@@ -181,6 +180,10 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 						else
 							ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] = ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] + amount
 						end
+						-- Also calculate pet combatTime per player
+						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp
+						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime = ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime + ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount
+						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
 					end
 
 					if not ns.moduleDBtotal[module] then
@@ -217,14 +220,11 @@ function ns.resetData()
 			end
 		end
 		if ns.DB.spells[module] then
-		for k, v in pairs(ns.DB.spells[module]) do
+			for k, v in pairs(ns.DB.spells[module]) do
 				ns.DB.spells[module][k] = nil
 			end
 		end
-	end
-
-	for k, v in pairs(ns.moduleDBtotal) do
-		ns.moduleDBtotal[k] = nil
+		ns.moduleDBtotal[module] = nil
 	end
 
 	-- Clear rank-table
