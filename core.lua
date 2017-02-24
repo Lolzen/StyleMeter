@@ -39,7 +39,7 @@ function eF:addUnitToDB(unit, owner)
 			ns.DB.players[name..realm] = {
 				["class"] = select(1, UnitClass(unit)),
 				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(unit))],
-				["guid"] = guid, 
+				["guid"] = guid,
 			}
 			-- Insert player names into ns.DB.rank
 			ns.DB.rank[#ns.DB.rank+1] = name..realm
@@ -56,7 +56,7 @@ function eF:addUnitToDB(unit, owner)
 		end
 	elseif unitType == "Pet" or unitType == "Creature" then
 		local realm = realm and realm ~= "" and "-"..realm or ""
-		local ownerguid = UnitGUID(owner) or ""
+		local ownerguid = UnitGUID(owner)
 
 		-- Create the pet key in ns.DB.pets
 		if not ns.DB.pets[guid] then
@@ -117,6 +117,16 @@ function eF.PLAYER_ENTERING_WORLD()
 	end
 end
 
+function eF.checkParameterValues(self, t, p, ...)
+	local value
+	if string.match(t[p], "arg(%d+)") then
+		value = select(string.match(t[p], "arg(%d+)"), ...)
+	else
+		value = t[p]
+	end
+	return value
+end
+
 function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = ...
 	-- Check if user exist in DB before gathering data
@@ -124,20 +134,13 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 		local unitType = select(1, strsplit("-", sourceGUID))
 		for module, vars in pairs(ns.module) do
 			-- eventTypeString = eg "SPELL_DAMAGE_PERIODIC"
-			for _, eventTypeString in pairs(vars["strings"]) do
+			for eventTypeString, params in pairs(vars) do
 				-- If we find a eventType defined from modules
 				if string.find(eventType, eventTypeString) then
-					-- Return the arguments defined from modules to determine the right value
-					-- Unify arguments from SWING and SPELL eventTypes
-					local spellId, spellName, spellSchool
-					local amount, overkill, school, resisted, blocked, absorbed, critical, glancing, crushing
-					if type(select(13, ...)) == "string" then
-						spellId, spellName, spellSchool = select(12, ...)
-						amount, overkill, school, resisted, blocked, absorbed, critical, glancing, crushing = select(15, ...)
-					else
-						spellId, spellName, spellSchool = 6603, "Auto Attack", 	1
-						amount, overkill, school, resisted, blocked, absorbed, critical, glancing, crushing = select(12, ...)
-					end
+					-- Return the arguments defined from modules to determine the right amount, spellName, etc.
+					-- Do this dynamically for parameters which can be different in some situations (dispel amount should be 1, Auto Attack has no spellName, etc.)
+					local amount = eF:checkParameterValues(params, "amount", ...)
+					local spellName = eF:checkParameterValues(params, "spellName", ...)
 
 					-- add values to DB
 					if unitType == "Player" then
@@ -157,13 +160,15 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							ns.DB.spells[module][sourceName][spellName] = ns.DB.spells[module][sourceName][spellName] + amount
 						end
 						-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
-						ns.DB.players[sourceName][module].amount = timeStamp - ns.DB.players[sourceName][module].previous_timestamp
-						if ns.DB.players[sourceName][module].amount < 3.5 then
-							ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + ns.DB.players[sourceName][module].amount
-						else
-							ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + 3.5
+						if ns.DB.players[sourceName][module].amount then
+							ns.DB.players[sourceName][module].amount = timeStamp - ns.DB.players[sourceName][module].previous_timestamp
+							if ns.DB.players[sourceName][module].amount < 3.5 then
+								ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + ns.DB.players[sourceName][module].amount
+							else
+								ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + 3.5
+							end
+							ns.DB.players[sourceName][module].previous_timestamp = timeStamp
 						end
-						ns.DB.players[sourceName][module].previous_timestamp = timeStamp
 					elseif unitType == "Pet" or unitType == "Creature" then
 						-- Pets
 						if not ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] then
@@ -181,9 +186,11 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] = ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] + amount
 						end
 						-- Also calculate pet combatTime per player
-						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp
-						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime = ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime + ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount
-						ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
+						if ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount then
+							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp
+							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime = ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime + ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount
+							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
+						end
 					end
 
 					if not ns.moduleDBtotal[module] then
@@ -225,16 +232,15 @@ function ns.resetData()
 			end
 		end
 		ns.moduleDBtotal[module] = nil
+		-- Reset the combatTime
+		for name, v in pairs(ns.DB.players) do
+			ns.DB.players[name][module].combatTime = 0
+		end
 	end
 
 	-- Clear rank-table
 	for k, v in ipairs(ns.DB.rank) do 
 		ns.DB.rank[v] = nil
-	end
-
-	-- Reset the combatTime
-	for name, v in pairs(ns.DB.players) do
-		ns.DB.players[name].combatTime = 0
 	end
 
 	-- Also let the layout reset things, if the function exists
