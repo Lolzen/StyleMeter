@@ -1,8 +1,10 @@
-## Interface: 70100
+## Interface: 73000
 ## Title: StyleMeter
 ## Author: Lolzen
 ## Notes: Highly customizable, modular Damage Meter
 ## Version: 0.0.1 Alpha
+## SavedVariables: StyleMetercfg
+## SavedVariablesPerCharacter: StyleMeterDB
 
 core.lua
 panel.lua
