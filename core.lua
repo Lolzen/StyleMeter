@@ -8,68 +8,126 @@ local eF = CreateFrame("Frame", "eventFrame", UIParent)
 eF:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eF:RegisterEvent("GROUP_ROSTER_UPDATE")
 eF:RegisterEvent("PLAYER_ENTERING_WORLD")
-eF:RegisterEvent("UNIT_PET")
+eF:RegisterEvent("UNIT_PET")	
+eF:RegisterEvent("PLAYER_REGEN_ENABLED")
+eF:RegisterEvent("ADDON_LOADED")
 
--- Create our databases
-ns.DB = {
-	players = {},
-	pets = {},
-	rank = {},
-	spells = {},
-}
+-- Create our databases and configs
+function eF:ADDON_LOADED(event, addon)
+	if addon == "StyleMeter" then
+		-- DBs
+		if StyleMeterDB == nil then
+			StyleMeterDB = {
+				DB = {
+					players = {},
+					pets = {},
+					rank = {},
+				},
+				data = {
+					overall = {},
+					current = {},
+				},
+			}	
+			ns.DB = StyleMeterDB.DB
+			ns.data = StyleMeterDB.data
+		else
+			ns.DB = StyleMeterDB.DB
+			ns.data = StyleMeterDB.data
+		end
+	end
+end
 
 -- module (data) & plugin (feature) databases
 ns.module = {}
 ns.plugin = {}
 
-ns.moduleDB, ns.moduleDBtotal = {}, {}
-
 function eF:addUnitToDB(unit, owner)
 	local guid = UnitGUID(unit)
-	if not guid or guid == "" then return end
+--	if not guid or guid == "" then return end
 	local unitType = select(1, strsplit("-", guid))
-	local name, realm = UnitName(unit)
+	-- the default Blizzard UI defines GetUnitName(unit, showServerName) which only returns the unit name, 
+	-- but for characters from another server appends the server name (showServerName==true) or "(*)" (if showServerName==false).
+	local name = GetUnitName(unit, true)
 	if not name or name == "Unknown" then return end
-
+	
 	if unitType == "Player" then
-		local realm = realm and realm ~= "" and "-"..realm or ""
-
 		-- Create the player key in ns.DB.players
-		if not ns.DB.players[name..realm] then
-			ns.DB.players[name..realm] = {
+		if not ns.DB.players[name] then
+			ns.DB.players[name] = {
 				["class"] = select(1, UnitClass(unit)),
 				["classcolor"] = RAID_CLASS_COLORS[select(2, UnitClass(unit))],
-				["guid"] = guid,
+				["gatherdata"] = true,
 			}
 			-- Insert player names into ns.DB.rank
-			ns.DB.rank[#ns.DB.rank+1] = name..realm
+			if not ns.DB.rank[name] then
+				--ns.DB.rank[#ns.DB.rank+1] = name
+				tinsert(ns.DB.rank, name)
+			end
 			-- Keep track of differen per second calculation values per module
 			for module in pairs(ns.module) do
-				if not ns.DB.players[name..realm][module] then
-					ns.DB.players[name..realm][module] = {
-						["combatTime"] = 0,
-						["amount"] = 0,
-						["previous_timestamp"] = 0,
-					}
+				for mode in pairs(ns.data) do
+					if not ns.data[mode][name] then
+						ns.data[mode][name] = {}
+					end
+					if not ns.data[mode][name][module] then
+						ns.data[mode][name][module] = {
+							-- SpellDB
+							spells = {},
+							-- Total amount of [module]
+							total = 0,
+							-- Combat time values
+							combatTime = 0,
+							amount = 0,
+							previous_timestamp = 0,
+						}
+					end
 				end
 			end
 		end
-	elseif unitType == "Pet" or unitType == "Creature" then
-		local realm = realm and realm ~= "" and "-"..realm or ""
-		local ownerguid = UnitGUID(owner)
-
-		-- Create the pet key in ns.DB.pets
+	elseif unitType == "Pet" then
 		if not ns.DB.pets[guid] then
 			ns.DB.pets[guid] = { 
 				["name"] = name,
 				["owner"] = owner,
-				["ownerguid"] = ownerguid,
+				["gatherdata"] = true,
 			}
+		end
+	end
+end
+
+function eF:removeUnitFromDatatracking(unit, owner)
+	local name = GetUnitName(unit, true)
+	if not name or name == "Unknown" then return end
+	
+	-- Remove the player key in ns.DB.players and pet key in ns.DB.pets
+	if ns.DB.players[name] then
+		ns.DB.players[name].gatherdata = false
+	end
+	for k in pairs(ns.DB.pets) do
+		if k.owner == name then
+			ns.DB.pets[k].gatherdata = false
 		end
 	end
 end
  
 function eF:UpdateWatchedPlayers()
+	-- Delete Players/Pets that aren't in group/raid anymore and stop gathering data on them
+	for k in pairs(ns.DB.players) do
+		if k ~= UnitName("Player") then
+			if IsInGroup("player") and not IsInRaid("player") then
+				if not UnitInParty(k) then
+					eF:removeUnitFromDatatracking(k)
+				end
+			elseif IsInRaid("player") then
+				if not UnitInRaid(k) then
+					eF:removeUnitFromDatatracking(k)
+				end
+			else
+				eF:removeUnitFromDatatracking(k)
+			end
+		end
+	end
+
 	-- Insert player name
 	eF:addUnitToDB("player")
 
@@ -79,8 +137,7 @@ function eF:UpdateWatchedPlayers()
 	end
 
 	-- Insert party members & pets
-	local isInGroup = IsInGroup("player")
-	if isInGroup then
+	if IsInGroup("player") then
 		for i=1, GetNumSubgroupMembers() do
 			eF:addUnitToDB("party"..i)
 			if UnitExists("partypet"..i) then
@@ -90,8 +147,7 @@ function eF:UpdateWatchedPlayers()
 	end
 
 	-- Insert raid members & pets
-	local isInRaid = IsInRaid("player")
-	if isInRaid then
+	if IsInRaid("player") then
 		for i=1, GetNumGroupMembers() do
 			eF:addUnitToDB("raid"..i)
 			if UnitExists("raidpet"..i) then
@@ -109,29 +165,75 @@ eF.UNIT_PET = eF.UpdateWatchedPlayers
 -- update the Watched Players and call the update functions for layouts
 function eF.PLAYER_ENTERING_WORLD()
 	eF:UpdateWatchedPlayers()
-	if ns.UpdateLogin then
-		ns:UpdateLogin()
+	-- display cfg
+	-- Select Damage as the standard module and Hybrid as the standard mode if they aren't set yet
+	-- else use the saved vars
+	if StyleMetercfg == nil then
+		StyleMetercfg = {
+			displaymodule = "Damage",
+			displaymode = "Hybrid",
+		}
+		StyleMeter.switchModule("Damage")
+		StyleMeter.switchMode("Hybrid")
+	else
+		StyleMeter.switchModule(StyleMetercfg.displaymodule)
+		StyleMeter.switchMode(StyleMetercfg.displaymode)
 	end
 	if ns.UpdateLayout then
 		ns:UpdateLayout()
 	end
 end
 
-function eF.checkParameterValues(self, t, p, ...)
-	local value
-	if string.match(t[p], "arg(%d+)") then
-		value = select(string.match(t[p], "arg(%d+)"), ...)
-	else
-		value = t[p]
+function eF.PLAYER_REGEN_ENABLED()
+	-- Reset every current data if we leave battle
+	for name in pairs(ns.data.current) do
+		if not ns.module[name] then
+			if ns.data.current[name] then
+				for module in pairs(ns.module) do
+					ns.data.current[name][module].spells = {}
+					ns.data.current[name][module].total = 0
+					ns.data.current[name][module].combatTime = 0
+					ns.data.current[name][module].amount = 0
+					ns.data.current[name][module].previous_timestamp = 0
+					ns.data.current[module] = 0
+				end
+			end
+		end
 	end
-	return value
+	-- Update the layout
+	if ns.UpdateLayout then
+		ns:UpdateLayout()
+	end
+end
+
+-- Return the correct arguments or values related to the parameters from modules
+function eF.checkParameterValues(self, t, p, ...)
+--	local value
+	if string.match(t[p], "arg(%d+)") then
+		return select(string.match(t[p], "arg(%d+)"), ...)
+	else
+		return t[p]
+	end
+--	return value
+end
+
+-- Throttle updating
+-- This is done to prevent multiple updates within a single fragment of a second (especially in raids)
+-- The lower the value, the more CPU heavy it will get
+local last_ts = 0
+function eF.isThrottled(self, timeStamp)
+	if timeStamp - last_ts < 0.5 then
+		return true
+	else
+		last_ts = timeStamp
+		return false
+	end
 end
 
 function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = ...
 	-- Check if user exist in DB before gathering data
-	if ns.DB.players[sourceName] or ns.DB.pets[sourceGUID] then
-		local unitType = select(1, strsplit("-", sourceGUID))
+	if (ns.DB.players[sourceName] and ns.DB.players[sourceName].gatherdata == true) or (ns.DB.pets[sourceGUID] and ns.DB.pets[sourceGUID].gatherdata == true) then
 		for module, vars in pairs(ns.module) do
 			-- eventTypeString = eg "SPELL_DAMAGE_PERIODIC"
 			for eventTypeString, params in pairs(vars) do
@@ -142,65 +244,64 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 					local amount = eF:checkParameterValues(params, "amount", ...)
 					local spellName = eF:checkParameterValues(params, "spellName", ...)
 
-					-- add values to DB
-					if unitType == "Player" then
+					local unitType = select(1, strsplit("-", sourceGUID))
+					for mode in pairs(ns.data) do
+						-- Add values to ns.data
 						-- Players
-						if not ns.moduleDB[module][sourceName] then
-							ns.moduleDB[module][sourceName] = amount
-						else
-							ns.moduleDB[module][sourceName] = ns.moduleDB[module][sourceName] + amount
-						end
-						-- track the individual spell or ability numbers too
-						if not ns.DB.spells[module][sourceName] then
-							ns.DB.spells[module][sourceName] = {}
-						end
-						if not ns.DB.spells[module][sourceName][spellName] then
-							ns.DB.spells[module][sourceName][spellName] = amount
-						else
-							ns.DB.spells[module][sourceName][spellName] = ns.DB.spells[module][sourceName][spellName] + amount
-						end
-						-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
-						if ns.DB.players[sourceName][module].amount then
-							ns.DB.players[sourceName][module].amount = timeStamp - ns.DB.players[sourceName][module].previous_timestamp
-							if ns.DB.players[sourceName][module].amount < 3.5 then
-								ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + ns.DB.players[sourceName][module].amount
+						if unitType == "Player" then
+							-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
+							if not ns.data[mode][sourceName][module].spells[spellName] then
+								ns.data[mode][sourceName][module].spells[spellName] = {
+									["amount"] = amount,
+								}
 							else
-								ns.DB.players[sourceName][module].combatTime = ns.DB.players[sourceName][module].combatTime + 3.5
+								ns.data[mode][sourceName][module].spells[spellName].amount = ns.data[mode][sourceName][module].spells[spellName].amount + amount
 							end
-							ns.DB.players[sourceName][module].previous_timestamp = timeStamp
-						end
-					elseif unitType == "Pet" or unitType == "Creature" then
-						-- Pets
-						if not ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] then
-							ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] = amount
-						else
-							ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] = ns.moduleDB[module][ns.DB.pets[sourceGUID].owner] + amount
-						end
-						-- track the pets as spell in the overview
-						if not ns.DB.spells[module][ns.DB.pets[sourceGUID].owner] then
-							ns.DB.spells[module][ns.DB.pets[sourceGUID].owner] = {}
-						end
-						if not ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] then
-							ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] = amount
-						else
-							ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] = ns.DB.spells[module][ns.DB.pets[sourceGUID].owner][sourceName] + amount
-						end
-						-- Also calculate pet combatTime per player
-						if ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount then
-							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp
-							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime = ns.DB.players[ns.DB.pets[sourceGUID].owner][module].combatTime + ns.DB.players[ns.DB.pets[sourceGUID].owner][module].amount
-							ns.DB.players[ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
-						end
-					end
 
-					if not ns.moduleDBtotal[module] then
-						ns.moduleDBtotal[module] = amount
-					else
-						ns.moduleDBtotal[module] = ns.moduleDBtotal[module] + amount
+							-- Total amount of player
+							ns.data[mode][sourceName][module].total = ns.data[mode][sourceName][module].total + amount
+
+							-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
+							ns.data[mode][sourceName][module].amount = timeStamp - ns.data[mode][sourceName][module].previous_timestamp
+							if ns.data[mode][sourceName][module].amount < 3.5 then
+								ns.data[mode][sourceName][module].combatTime = ns.data[mode][sourceName][module].combatTime + ns.data[mode][sourceName][module].amount
+							else
+								ns.data[mode][sourceName][module].combatTime = ns.data[mode][sourceName][module].combatTime + 3.5
+							end
+							ns.data[mode][sourceName][module].previous_timestamp = timeStamp
+						-- Pets
+						elseif unitType == "Pet" or "Creature" then
+							-- track the pets as spell in the overview
+							-- we have to check if the db actually exists, otherwise we'll get errors some times
+							if ns.data[mode][ns.DB.pets[sourceGUID].owner] then
+								if not ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] then
+									ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] = {
+										["amount"] = amount,
+									}
+								else
+									ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName].amount = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName].amount + amount
+								end
+
+								-- Add pet damage to it's owner's damage
+								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].total = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].total + amount
+
+								-- Also calculate pet combatTime from pet to player
+								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.data[mode][ns.DB.pets[sourceGUID].owner][module].previous_timestamp
+								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].combatTime = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].combatTime + ns.data[mode][ns.DB.pets[sourceGUID].owner][module].amount
+								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
+							end
+						end
+
+						-- Totals as a numeric value
+						if not ns.data[mode][module] then
+							ns.data[mode][module] = amount
+						else
+							ns.data[mode][module] = ns.data[mode][module] + amount
+						end
 					end
 
 					-- Update the layout
-					if ns.UpdateLayout then
+					if ns.UpdateLayout and eF:isThrottled(timeStamp) == false then
 						ns:UpdateLayout()
 					end
 				elseif string.find(eventType, "SPELL_SUMMON") then
@@ -209,7 +310,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 						ns.DB.pets[destGUID] = {
 							["name"] = destName,
 							["owner"] = sourceName,
-							["ownerguid"] = sourceGUID,
+							["gatherdata"] = true,
 						}
 					end
 				end
@@ -218,38 +319,49 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 	end
 end
 
+--//#core functions available to layouts and/or plugins#//--
 -- Resettingfunction (reset all collected data)
 function ns.resetData()
-	for module, _ in pairs(ns.module) do
-		if ns.moduleDB[module] then
-			for k, v in pairs(ns.moduleDB[module]) do
-				ns.moduleDB[module][k] = nil
+	for name in pairs(ns.data.current) do
+		if not ns.module[name] then
+			if ns.data.current[name] then
+				for module in pairs(ns.module) do
+					for mode in pairs(ns.data) do
+						ns.data[mode][name][module].spells = {}
+						ns.data[mode][name][module].total = 0
+						ns.data[mode][name][module].combatTime = 0
+						ns.data[mode][name][module].amount = 0
+						ns.data[mode][name][module].previous_timestamp = 0
+						ns.data[mode][module] = 0
+					end
+				end
 			end
-		end
-		if ns.DB.spells[module] then
-			for k, v in pairs(ns.DB.spells[module]) do
-				ns.DB.spells[module][k] = nil
-			end
-		end
-		ns.moduleDBtotal[module] = nil
-		-- Reset the combatTime
-		for name, v in pairs(ns.DB.players) do
-			ns.DB.players[name][module].combatTime = 0
 		end
 	end
 
 	-- Clear rank-table
-	for k, v in ipairs(ns.DB.rank) do 
-		ns.DB.rank[v] = nil
-	end
-
-	-- Also let the layout reset things, if the function exists
-	if ns.layoutSpecificReset then
-		ns.layoutSpecificReset()
-	end
+	ns.DB.rank = {}
+	
+	-- clear saved vars and reinitiate an empty DB
+	-- also call eF:UpdateWatchedPlayers()
+	StyleMeterDB = {
+		DB = {
+			players = {},
+			pets = {},
+			rank = {},
+		},
+		data = {
+			overall = {},
+			current = {},
+		},
+	}
+	ns.DB = StyleMeterDB.DB
+	ns.data = StyleMeterDB.data
+	eF:UpdateWatchedPlayers()
 end
 
-ns.siValue = function(val)
+-- shortInteger value
+function ns.siValue(val)
 	if val >= 1e6 then
 		return ('%.1f'):format(val / 1e6):gsub('%.', 'm')
 	elseif val >= 1e4 then
@@ -257,6 +369,125 @@ ns.siValue = function(val)
 	else
 		return val
 	end
+end
+
+-- Search a table for a specific entry
+-- see https://stackoverflow.com/questions/33510736/check-if-array-contains-specific-value
+function ns.contains(table, val)
+	for i=1, #table do
+		if table[i] == val then 
+			return true
+		end
+	end
+	return false
+end
+
+-- Seach a table for a specific entry and return it's indes number
+-- see https://scriptinghelpers.org/questions/10051/is-there-a-way-to-remove-a-value-from-a-table-without-knowing-its-index
+-- under Linear Search
+function ns.tablefind(tab,el)
+	for index, value in pairs(tab) do
+		if value == el then
+			return index
+		end
+	end
+end
+
+-- Determine if any partymember is in Combat
+local inCombat = {}
+function ns.checkPartyCombat()
+	for name in pairs(ns.data.current) do
+		if UnitAffectingCombat(name) then
+			if not ns.contains(inCombat, name) then
+				tinsert(inCombat, name)
+			end
+		else
+			if ns.contains(inCombat, name) then
+				tremove(inCombat, ns.tablefind(inCombat, name))
+			end
+		end
+	end
+	if table.getn(inCombat) > 0 then
+		return true
+	else
+		return false
+	end
+end
+
+-- Determine the correct mode values
+-- Current: Current fight
+-- Overall: All fights
+-- Hybrid: switch btween current and Overall dependent on inFight situation
+function ns.getModeData(num)
+	if ns.DB.rank[num] then
+		if ns.activeMode == "Current" then
+			return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
+		elseif ns.activeMode == "Overall" then
+			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
+		elseif ns.activeMode == "Hybrid" then
+			if ns.checkPartyCombat() == true then
+				if ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0 then
+					return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
+				end
+			else
+				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
+			end
+		end
+	end
+end
+
+-- Get The correct combatTime and spells used
+-- return the values in regards to selected mode
+function ns.getTimeAndSpells(num)
+	if ns.DB.rank[num] then
+		if ns.activeMode == "Current" then
+			return ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.current[ns.DB.rank[num]][ns.activeModule].spells
+		elseif ns.activeMode == "Overall" then
+			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
+		elseif ns.activeMode == "Hybrid" then
+			if ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime > 0 then
+				return ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.current[ns.DB.rank[num]][ns.activeModule].spells
+			else
+				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
+			end
+		end
+	end
+end
+
+-- Dynamic sorting function
+-- Sort the rank table in redards to mode
+-- This function is intended to sort collected data from top to bottom (1, 2, 3,..)
+-- call this whenever you want to update information to be updated with ranks in mind (e.g. sort Statusbars)
+function ns.sortRank()
+	if ns.activeMode == "Current" then
+		sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
+	elseif ns.activeMode == "Overall" then
+		sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
+	elseif ns.activeMode == "Hybrid" then
+		if ns.checkPartyCombat() == true then
+			sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
+		else
+			sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
+		end
+	end
+end
+
+function ns.switchModule(module)
+	if module ~= nil then
+		ns.activeModule = module
+	end
+
+	-- Sort Rank table
+	ns.sortRank()
+end
+
+function ns.switchMode(mode)
+	if mode ~= nil then
+		ns.activeMode = mode
+	end
+	
+	-- Sort Rank table
+	ns.sortRank()
 end
 
 SLASH_STYLEMETER1 = "/sm"
