@@ -414,6 +414,24 @@ function ns.checkPartyCombat()
 	end
 end
 
+-- Dynamic sorting function
+-- Sort the rank table in redards to mode
+-- This function is intended to sort collected data from top to bottom (1, 2, 3,..)
+-- call this whenever you want to update information to be updated with ranks in mind (e.g. sort Statusbars)
+function ns.sortRank()
+	if ns.activeMode == "Current" then
+		sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
+	elseif ns.activeMode == "Overall" then
+		sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
+	elseif ns.activeMode == "Hybrid" then
+		if ns.checkPartyCombat() == true then
+			sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
+		else
+			sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
+		end
+	end
+end
+
 -- Determine the correct mode values
 -- Current: Current fight
 -- Overall: All fights
@@ -425,11 +443,11 @@ function ns.getModeData(num)
 		elseif ns.activeMode == "Overall" then
 			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 		elseif ns.activeMode == "Hybrid" then
-			if ns.checkPartyCombat() == true then
-				if ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0 then
-					return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
-				end
+			if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) or ns.checkPartyCombat() == true then
+				return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
 			else
+				-- call ns.sortRank so the display is not borked
+				ns.sortRank()
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 			end
 		end
@@ -450,24 +468,6 @@ function ns.getTimeAndSpells(num)
 			else
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
 			end
-		end
-	end
-end
-
--- Dynamic sorting function
--- Sort the rank table in redards to mode
--- This function is intended to sort collected data from top to bottom (1, 2, 3,..)
--- call this whenever you want to update information to be updated with ranks in mind (e.g. sort Statusbars)
-function ns.sortRank()
-	if ns.activeMode == "Current" then
-		sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
-	elseif ns.activeMode == "Overall" then
-		sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
-	elseif ns.activeMode == "Hybrid" then
-		if ns.checkPartyCombat() == true then
-			sort(ns.DB.rank, function(a, b) return ns.data.current[a][ns.activeModule].total > ns.data.current[b][ns.activeModule].total end)
-		else
-			sort(ns.DB.rank, function(a, b) return ns.data.overall[a][ns.activeModule].total > ns.data.overall[b][ns.activeModule].total end)
 		end
 	end
 end
