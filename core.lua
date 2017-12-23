@@ -241,8 +241,19 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 				if string.find(eventType, eventTypeString) then
 					-- Return the arguments defined from modules to determine the right amount, spellName, etc.
 					-- Do this dynamically for parameters which can be different in some situations (dispel amount should be 1, Auto Attack has no spellName, etc.)
-					local amount = eF:checkParameterValues(params, "amount", ...)
+					local spellID = eF:checkParameterValues(params, "spellId", ...)
 					local spellName = eF:checkParameterValues(params, "spellName", ...)
+					local spellSchool = eF:checkParameterValues(params, "spellSchool", ...)
+					local amount = eF:checkParameterValues(params, "amount", ...)
+					local overkill = eF:checkParameterValues(params, "overkill", ...)
+					local school = eF:checkParameterValues(params, "school", ...)
+					local resisted = eF:checkParameterValues(params, "resisted", ...)
+					local blocked = eF:checkParameterValues(params, "blocked", ...)
+					local absorbed = eF:checkParameterValues(params, "absorbed", ...)
+					local critical = eF:checkParameterValues(params, "critical", ...)
+					local glancing = eF:checkParameterValues(params, "glancing", ...)
+					local crushing = eF:checkParameterValues(params, "crushing", ...)
+					local isOffHand = eF:checkParameterValues(params, "isOffHand", ...)
 
 					local unitType = select(1, strsplit("-", sourceGUID))
 					for mode in pairs(ns.data) do
