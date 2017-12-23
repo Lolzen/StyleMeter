@@ -263,7 +263,10 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
 							if not ns.data[mode][sourceName][module].spells[spellName] then
 								ns.data[mode][sourceName][module].spells[spellName] = {
+									["spellID"] = spellID,
+									["spellSchool"] = spellSchool,
 									["amount"] = amount,
+									["school"] = school,
 								}
 							else
 								ns.data[mode][sourceName][module].spells[spellName].amount = ns.data[mode][sourceName][module].spells[spellName].amount + amount
