@@ -259,7 +259,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 					for mode in pairs(ns.data) do
 						-- Add values to ns.data
 						-- Players
-						if unitType == "Player" then
+						if unitType == "Player" and amount > 0 then
 							-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
 							if not ns.data[mode][sourceName][module].spells[spellName] then
 								ns.data[mode][sourceName][module].spells[spellName] = {
@@ -281,7 +281,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							end
 							ns.data[mode][sourceName][module].previous_timestamp = timeStamp
 						-- Pets
-						elseif unitType == "Pet" or "Creature" then
+						elseif unitType == "Pet" or "Creature" and amount > 0 then
 							-- track the pets as spell in the overview
 							-- we have to check if the db actually exists, otherwise we'll get errors some times
 							if ns.data[mode][ns.DB.pets[sourceGUID].owner] then
