@@ -290,6 +290,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 							if ns.data[mode][ns.DB.pets[sourceGUID].owner] then
 								if not ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] then
 									ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] = {
+										["spellSchool"] = 1, --let pets just be physical as "spellSchool"
 										["amount"] = amount,
 									}
 								else
