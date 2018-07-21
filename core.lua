@@ -348,6 +348,12 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 						over = select(string.match(params["overheal"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+
+						-- Ray of Hope bugs out
+						if spellID == 197268 then
+							amount = 0
+							over = 0
+						end
 					end
 
 					local cLogSpell
