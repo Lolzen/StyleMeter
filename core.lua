@@ -20,7 +20,7 @@ function eF:ADDON_LOADED(event, addon)
 			StyleMeterDB = {
 				DB = {
 					players = {},
-					pets = {},
+					guids = {},
 					rank = {},
 				},
 				data = {
@@ -60,10 +60,15 @@ function eF:addUnitToDB(unit, owner)
 			}
 			-- Insert player names into ns.DB.rank
 			if not ns.DB.rank[name] then
-				--ns.DB.rank[#ns.DB.rank+1] = name
-				tinsert(ns.DB.rank, name)
+				table.insert(ns.DB.rank, name)
 			end
-			-- Keep track of differen per second calculation values per module
+			-- Insert guid in ns.DB.guids
+			if not ns.DB.guids[guid] then
+				ns.DB.guids[guid] = {
+					["name"] = name,
+				}
+			end
+			-- Keep track of different per second calculation values per module
 			for module in pairs(ns.module) do
 				for mode in pairs(ns.data) do
 					if not ns.data[mode][name] then
@@ -85,11 +90,30 @@ function eF:addUnitToDB(unit, owner)
 			end
 		end
 	elseif unitType == "Pet" then
-		if not ns.DB.pets[guid] then
-			ns.DB.pets[guid] = { 
-				["name"] = name,
-				["owner"] = owner,
-				["gatherdata"] = true,
+		--if pets are registered first.. we need to create the PlayerDB
+		for module in pairs(ns.module) do
+			for mode in pairs(ns.data) do
+				if not ns.data[mode][owner] then
+					ns.data[mode][owner] = {}
+				end
+				if not ns.data[mode][owner][module] then
+					ns.data[mode][owner][module] = {
+						-- SpellDB
+						spells = {},
+						-- Total amount of [module]
+						total = 0,
+						-- Combat time values
+						combatTime = 0,
+						amount = 0,
+						previous_timestamp = 0,
+					}
+				end
+			end
+		end
+		-- Insert pet guid in ns.DB.guids
+		if not ns.DB.guids[guid] then
+			ns.DB.guids[guid] = {
+				["name"] = owner,
 			}
 		end
 	end
@@ -102,11 +126,6 @@ function eF:removeUnitFromDatatracking(unit, owner)
 	-- Remove the player key in ns.DB.players and pet key in ns.DB.pets
 	if ns.DB.players[name] then
 		ns.DB.players[name].gatherdata = false
-	end
-	for k in pairs(ns.DB.pets) do
-		if k.owner == name then
-			ns.DB.pets[k].gatherdata = false
-		end
 	end
 end
  
@@ -141,7 +160,7 @@ function eF:UpdateWatchedPlayers()
 		for i=1, GetNumSubgroupMembers() do
 			eF:addUnitToDB("party"..i)
 			if UnitExists("partypet"..i) then
-				eF:addUnitToDB(("partypet"..i), UnitName("party"..i))
+				eF:addUnitToDB("partypet"..i, UnitName("party"..i))
 			end
 		end
 	end
@@ -151,7 +170,7 @@ function eF:UpdateWatchedPlayers()
 		for i=1, GetNumGroupMembers() do
 			eF:addUnitToDB("raid"..i)
 			if UnitExists("raidpet"..i) then
-				eF:addUnitToDB(("raidpet"..i), UnitName("raid"..i))
+				eF:addUnitToDB("raidpet"..i, UnitName("raid"..i))
 			end
 		end
 	end
@@ -173,11 +192,11 @@ function eF.PLAYER_ENTERING_WORLD()
 			displaymodule = "Damage",
 			displaymode = "Hybrid",
 		}
-		StyleMeter.switchModule("Damage")
-		StyleMeter.switchMode("Hybrid")
+		ns.switchModule("Damage")
+		ns.switchMode("Hybrid")
 	else
-		StyleMeter.switchModule(StyleMetercfg.displaymodule)
-		StyleMeter.switchMode(StyleMetercfg.displaymode)
+		ns.switchModule(StyleMetercfg.displaymodule)
+		ns.switchMode(StyleMetercfg.displaymode)
 	end
 	if ns.UpdateLayout then
 		ns:UpdateLayout()
@@ -208,13 +227,11 @@ end
 
 -- Return the correct arguments or values related to the parameters from modules
 function eF.checkParameterValues(self, t, p, ...)
---	local value
 	if string.match(t[p], "arg(%d+)") then
-		return select(string.match(t[p], "arg(%d+)"), ...)
+		return p, select(string.match(t[p], "arg(%d+)"), ...)
 	else
-		return t[p]
+		return p, t[p]
 	end
---	return value
 end
 
 -- Throttle updating
@@ -230,82 +247,161 @@ function eF.isThrottled(self, timeStamp)
 	end
 end
 
-function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
-	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = ...
-	-- Check if user exist in DB before gathering data
-	if (ns.DB.players[sourceName] and ns.DB.players[sourceName].gatherdata == true) or (ns.DB.pets[sourceGUID] and ns.DB.pets[sourceGUID].gatherdata == true) then
+function eF.getClogName(self, guid)
+	return ns.DB.guids[guid].name
+end
+
+function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
+	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
+--	if string.find(eventType, "_ABSORBED") then
+--		print(...)
+--	end
+	
+	-- Check if user exist in DB before gathering data	
+	if ns.DB.players[sourceName] and ns.DB.players[sourceName].gatherdata == true then
+		if string.find(eventType, "_SUMMON") then
+			-- Create the pet key in ns.DB.pets
+			if not ns.DB.guids[destGUID] then
+				ns.DB.guids[destGUID] = {
+					["name"] = sourceName,
+				}
+			end
+		end
+		--if pets are registered first.. we need to create the PlayerDB
+		for module in pairs(ns.module) do
+			for mode in pairs(ns.data) do
+				if not ns.data[mode][sourceName] then
+					ns.data[mode][sourceName] = {}
+				end
+				if not ns.data[mode][sourceName][module] then
+					ns.data[mode][sourceName][module] = {
+						-- SpellDB
+						spells = {},
+						-- Total amount of [module]
+						total = 0,
+						-- Combat time values
+						combatTime = 0,
+						amount = 0,
+						previous_timestamp = 0,
+					}
+				end
+			end
+		end
+	end
+	
+	if ns.DB.guids[sourceGUID] then
+		local cLogName = eF:getClogName(sourceGUID)
+		
 		for module, vars in pairs(ns.module) do
-			-- eventTypeString = eg "SPELL_DAMAGE_PERIODIC"
+			-- eventTypeString = eg "SPELL_DAMAGE_PERIODIC"	
 			for eventTypeString, params in pairs(vars) do
 				-- If we find a eventType defined from modules
 				if string.find(eventType, eventTypeString) then
 					-- Return the arguments defined from modules to determine the right amount, spellName, etc.
 					-- Do this dynamically for parameters which can be different in some situations (dispel amount should be 1, Auto Attack has no spellName, etc.)
-					local spellID = eF:checkParameterValues(params, "spellId", ...)
-					local spellName = eF:checkParameterValues(params, "spellName", ...)
-					local spellSchool = eF:checkParameterValues(params, "spellSchool", ...)
-					local amount = eF:checkParameterValues(params, "amount", ...)
-					local overkill = eF:checkParameterValues(params, "overkill", ...)
-					local school = eF:checkParameterValues(params, "school", ...)
-					local resisted = eF:checkParameterValues(params, "resisted", ...)
-					local blocked = eF:checkParameterValues(params, "blocked", ...)
-					local absorbed = eF:checkParameterValues(params, "absorbed", ...)
-					local critical = eF:checkParameterValues(params, "critical", ...)
-					local glancing = eF:checkParameterValues(params, "glancing", ...)
-					local crushing = eF:checkParameterValues(params, "crushing", ...)
-					local isOffHand = eF:checkParameterValues(params, "isOffHand", ...)
-
-					local unitType = select(1, strsplit("-", sourceGUID))
-					for mode in pairs(ns.data) do
-						-- Add values to ns.data
-						-- Players
-						if unitType == "Player" and amount > 0 then
-							-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
-							if not ns.data[mode][sourceName][module].spells[spellName] then
-								ns.data[mode][sourceName][module].spells[spellName] = {
-									["spellID"] = spellID,
-									["spellSchool"] = spellSchool,
-									["amount"] = amount,
-									["school"] = school,
-								}
-							else
-								ns.data[mode][sourceName][module].spells[spellName].amount = ns.data[mode][sourceName][module].spells[spellName].amount + amount
-							end
-
-							-- Total amount of player
-							ns.data[mode][sourceName][module].total = ns.data[mode][sourceName][module].total + amount
-
-							-- Calculate individual combatTime per player, inspired by TinyDPS (thanks Sideshow!)
-							ns.data[mode][sourceName][module].amount = timeStamp - ns.data[mode][sourceName][module].previous_timestamp
-							if ns.data[mode][sourceName][module].amount < 3.5 then
-								ns.data[mode][sourceName][module].combatTime = ns.data[mode][sourceName][module].combatTime + ns.data[mode][sourceName][module].amount
-							else
-								ns.data[mode][sourceName][module].combatTime = ns.data[mode][sourceName][module].combatTime + 3.5
-							end
-							ns.data[mode][sourceName][module].previous_timestamp = timeStamp
-						-- Pets
-						elseif unitType == "Pet" or "Creature" and amount > 0 then
-							-- track the pets as spell in the overview
-							-- we have to check if the db actually exists, otherwise we'll get errors some times
-							if ns.data[mode][ns.DB.pets[sourceGUID].owner] then
-								if not ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] then
-									ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName] = {
-										["spellSchool"] = 1, --let pets just be physical as "spellSchool"
-										["amount"] = amount,
-									}
-								else
-									ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName].amount = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].spells[sourceName].amount + amount
-								end
-
-								-- Add pet damage to it's owner's damage
-								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].total = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].total + amount
-
-								-- Also calculate pet combatTime from pet to player
-								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].amount = timeStamp - ns.data[mode][ns.DB.pets[sourceGUID].owner][module].previous_timestamp
-								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].combatTime = ns.data[mode][ns.DB.pets[sourceGUID].owner][module].combatTime + ns.data[mode][ns.DB.pets[sourceGUID].owner][module].amount
-								ns.data[mode][ns.DB.pets[sourceGUID].owner][module].previous_timestamp = timeStamp
-							end
+					local spellID, spellName, spellSchool, amount, over, school, resitsed, blocked, aborbed, critical, glancing, crushing, isOffHand
+					-- Damage
+					if string.find(eventTypeString, "_DAMAGE") then
+						if string.match(params["spellId"], "arg(%d+)") then
+							spellID = select(string.match(params["spellId"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellID = params["spellId"]
 						end
+						if string.match(params["spellName"], "arg(%d+)") then
+							spellName = select(string.match(params["spellName"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellName = params["spellName"]
+						end
+						if string.match(params["spellSchool"], "arg(%d+)") then
+							spellSchool = select(string.match(params["spellSchool"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellSchool = params["spellSchool"]
+						end
+						amount = select(string.match(params["amount"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						over = select(string.match(params["overkill"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						school = select(string.match(params["school"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						resisted = select(string.match(params["resisted"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						blocked = select(string.match(params["blocked"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						glancing = select(string.match(params["glancing"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						crushing = select(string.match(params["crushing"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						isOffHand = select(string.match(params["isOffHand"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+					-- Heal
+					elseif string.find(eventTypeString, "_HEAL") then
+						if string.match(params["spellId"], "arg(%d+)") then
+							spellID = select(string.match(params["spellId"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellID = params["spellId"]
+						end
+						if string.match(params["spellName"], "arg(%d+)") then
+							spellName = select(string.match(params["spellName"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellName = params["spellName"]
+						end
+						if string.match(params["spellSchool"], "arg(%d+)") then
+							spellSchool = select(string.match(params["spellSchool"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						else
+							spellSchool = params["spellSchool"]
+						end
+						amount = select(string.match(params["amount"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						over = select(string.match(params["overheal"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+					end
+
+					local cLogSpell
+					local unitType = select(1, strsplit("-", sourceGUID))
+					if unitType == "Player" then
+						cLogSpell = spellName
+					elseif unitType == "Pet" or "Creature" then
+						cLogSpell = sourceName
+					end
+					
+					for mode in pairs(ns.data) do
+						-- Add values to ns.data					
+						-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
+						if not ns.data[mode][cLogName][module].spells[cLogSpell] then
+							ns.data[mode][cLogName][module].spells[cLogSpell] = {
+								["spellID"] = spellID,
+								["spellSchool"] = spellSchool or 1,
+								["amount"] = amount,
+							--	["overkill"] = overkill,
+								["school"] = school,
+							--	["resisted"] = resisted,
+							--	["blocked"] = blocked,
+							--	["absorbed"] = ansorbed,
+							--	["critical"] = critical,
+							--	["glancing"] = glancing,
+							--	["crushing"] = crushing,
+							--	["isOffHand"] = isOffHand,
+							}
+						else
+						--	ns.data[mode][sourceName][module].spells[spellName].spellID = spellID
+						--	ns.data[mode][sourceName][module].spells[spellName].spellSchool = spellSchool
+							ns.data[mode][cLogName][module].spells[cLogSpell].amount = ns.data[mode][cLogName][module].spells[cLogSpell].amount + amount
+						--	ns.data[mode][sourceName][module].spells[spellName].overkill = overkill
+						--	ns.data[mode][sourceName][module].spells[spellName].school = school
+						--	ns.data[mode][sourceName][module].spells[spellName].resisted = resisted
+						--	ns.data[mode][sourceName][module].spells[spellName].blocked = blocked
+						--	ns.data[mode][sourceName][module].spells[spellName].absorbed = ansorbed
+						--	ns.data[mode][sourceName][module].spells[spellName].critical = critical
+						--	ns.data[mode][sourceName][module].spells[spellName].glancing = glancing
+						--	ns.data[mode][sourceName][module].spells[spellName].crushing = crushing
+						--	ns.data[mode][sourceName][module].spells[spellName].isOffHand = isOffHand
+						end
+
+						-- Total amount of player (and pet)
+						ns.data[mode][cLogName][module].total = ns.data[mode][cLogName][module].total + amount
+
+						-- Calculate individual combatTime per player (and pet), inspired by TinyDPS (thanks Sideshow!)
+						ns.data[mode][cLogName][module].amount = timeStamp - ns.data[mode][cLogName][module].previous_timestamp
+						if ns.data[mode][cLogName][module].amount < 3.5 then
+							ns.data[mode][cLogName][module].combatTime = ns.data[mode][cLogName][module].combatTime + ns.data[mode][cLogName][module].amount
+						else
+							ns.data[mode][cLogName][module].combatTime = ns.data[mode][cLogName][module].combatTime + 3.5
+						end
+						ns.data[mode][cLogName][module].previous_timestamp = timeStamp
 
 						-- Totals as a numeric value
 						if not ns.data[mode][module] then
@@ -318,15 +414,6 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event, ...)
 					-- Update the layout
 					if ns.UpdateLayout and eF:isThrottled(timeStamp) == false then
 						ns:UpdateLayout()
-					end
-				elseif string.find(eventType, "SPELL_SUMMON") then
-					--Create the pet key in ns.DB.pets
-					if not ns.DB.pets[destGUID] then
-						ns.DB.pets[destGUID] = {
-							["name"] = destName,
-							["owner"] = sourceName,
-							["gatherdata"] = true,
-						}
 					end
 				end
 			end
@@ -362,7 +449,7 @@ function ns.resetData()
 	StyleMeterDB = {
 		DB = {
 			players = {},
-			pets = {},
+			guids = {},
 			rank = {},
 		},
 		data = {
@@ -382,7 +469,7 @@ function ns.siValue(val)
 	elseif val >= 1e4 then
 		return ("%.1f"):format(val / 1e3):gsub('%.', 'k')
 	else
-		return val
+		return math.floor(val)
 	end
 end
 
@@ -397,7 +484,7 @@ function ns.contains(table, val)
 	return false
 end
 
--- Seach a table for a specific entry and return it's indes number
+-- Seach a table for a specific entry and return it's index number
 -- see https://scriptinghelpers.org/questions/10051/is-there-a-way-to-remove-a-value-from-a-table-without-knowing-its-index
 -- under Linear Search
 function ns.tablefind(tab,el)
@@ -408,23 +495,70 @@ function ns.tablefind(tab,el)
 	end
 end
 
+function ns.resetCurData()
+	-- Reset current data on demand
+	for name in pairs(ns.data.current) do
+		if not ns.module[name] then
+			if ns.data.current[name] then
+				for module in pairs(ns.module) do
+					ns.data.current[name][module].spells = {}
+					ns.data.current[name][module].total = 0
+					ns.data.current[name][module].combatTime = 0
+					ns.data.current[name][module].amount = 0
+					ns.data.current[name][module].previous_timestamp = 0
+					ns.data.current[module] = 0
+				end
+			end
+		end
+	end
+end
+
 -- Determine if any partymember is in Combat
 local inCombat = {}
 function ns.checkPartyCombat()
 	for name in pairs(ns.data.current) do
-		if UnitAffectingCombat(name) then
-			if not ns.contains(inCombat, name) then
-				tinsert(inCombat, name)
-			end
-		else
-			if ns.contains(inCombat, name) then
-				tremove(inCombat, ns.tablefind(inCombat, name))
-			end
+		if UnitExists(name) then
+			if UnitAffectingCombat(name) then	
+				if not ns.contains(inCombat, name) then
+					table.insert(inCombat, name)
+				end
+			else
+				if ns.contains(inCombat, name) then
+					table.remove(inCombat, ns.tablefind(inCombat, name))
+				end
+			end		
 		end
 	end
 	if table.getn(inCombat) > 0 then
 		return true
 	else
+		return false
+	end
+end
+
+local dotsRunning = {}
+local lasttime = 0
+function ns.checkDotsRunning()
+	local seconds = GetTime()
+	for name in pairs(ns.data.overall) do
+		if UnitExists(name) then
+		--print(seconds - lasttime)
+			if ((seconds - lasttime) < 5) then	
+				if not ns.contains(dotsRunning, name) then
+					table.insert(dotsRunning, name)
+				end
+			else
+				if ns.contains(dotsRunning, name) then
+					table.remove(dotsRunning, ns.tablefind(dotsRunning, name))
+				end
+			end		
+			lasttime = GetTime()
+		end
+	end
+	if table.getn(dotsRunning) > 0 then
+		return true
+	else
+		ns:resetCurData()
 		return false
 	end
 end
@@ -458,11 +592,15 @@ function ns.getModeData(num)
 		elseif ns.activeMode == "Overall" then
 			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 		elseif ns.activeMode == "Hybrid" then
-			if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) or ns.checkPartyCombat() == true then
+			--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
+			if ns.checkPartyCombat() == true then
 				return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
 			else
+				--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
+				--	ns.resetCurData()
+				--end
 				-- call ns.sortRank so the display is not borked
-				ns.sortRank()
+				--ns.sortRank()
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 			end
 		end
@@ -478,7 +616,8 @@ function ns.getTimeAndSpells(num)
 		elseif ns.activeMode == "Overall" then
 			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
 		elseif ns.activeMode == "Hybrid" then
-			if ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime > 0 then
+			if ns.checkPartyCombat() == true then
+			--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
 				return ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.current[ns.DB.rank[num]][ns.activeModule].spells
 			else
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
