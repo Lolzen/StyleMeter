@@ -328,7 +328,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 						crushing = select(string.match(params["crushing"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						isOffHand = select(string.match(params["isOffHand"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 					-- Heal
-					elseif string.find(eventTypeString, "_HEAL") then
+					elseif string.gmatch(eventTypeString, "_HEAL%$") then
 						if string.match(params["spellId"], "arg(%d+)") then
 							spellID = select(string.match(params["spellId"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						else
