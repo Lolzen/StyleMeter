@@ -349,8 +349,8 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 
-						-- Ray of Hope bugs out
-						if spellID == 197268 then
+						-- Ray of Hope & Death Pact bugs out
+						if spellID == 197268 or 48743 then
 							amount = 0
 							over = 0
 						end
