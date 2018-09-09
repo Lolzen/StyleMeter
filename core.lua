@@ -43,7 +43,6 @@ ns.plugin = {}
 
 function eF:addUnitToDB(unit, owner)
 	local guid = UnitGUID(unit)
---	if not guid or guid == "" then return end
 	local unitType = select(1, strsplit("-", guid))
 	-- the default Blizzard UI defines GetUnitName(unit, showServerName) which only returns the unit name, 
 	-- but for characters from another server appends the server name (showServerName==true) or "(*)" (if showServerName==false).
@@ -359,7 +358,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 								["spellID"] = spellID,
 								["spellSchool"] = spellSchool or 1,
 								["amount"] = amount,
-								["overkill"] = overkill,
+								["overkill"] = over,
 							}
 						else
 							ns.data[mode][cLogName][module].spells[cLogSpell].amount = ns.data[mode][cLogName][module].spells[cLogSpell].amount + amount
