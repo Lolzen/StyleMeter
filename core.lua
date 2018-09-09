@@ -253,10 +253,7 @@ end
 
 function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 	local timeStamp, eventType, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
---	if string.find(eventType, "_ABSORBED") then
---		print(...)
---	end
-	
+
 	-- Check if user exist in DB before gathering data	
 	if ns.DB.players[sourceName] and ns.DB.players[sourceName].gatherdata == true then
 		if string.find(eventType, "_SUMMON") then
@@ -299,7 +296,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 				if string.find(eventType, eventTypeString) then
 					-- Return the arguments defined from modules to determine the right amount, spellName, etc.
 					-- Do this dynamically for parameters which can be different in some situations (dispel amount should be 1, Auto Attack has no spellName, etc.)
-					local spellID, spellName, spellSchool, amount, over, school, resitsed, blocked, aborbed, critical, glancing, crushing, isOffHand
+					local spellID, spellName, spellSchool, amount, over
 					-- Damage
 					if string.find(eventTypeString, "_DAMAGE") then
 						if string.match(params["spellId"], "arg(%d+)") then
@@ -319,14 +316,6 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 						end
 						amount = select(string.match(params["amount"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						over = select(string.match(params["overkill"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						school = select(string.match(params["school"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						resisted = select(string.match(params["resisted"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						blocked = select(string.match(params["blocked"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						glancing = select(string.match(params["glancing"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						crushing = select(string.match(params["crushing"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						isOffHand = select(string.match(params["isOffHand"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 					-- Heal
 					elseif string.gmatch(eventTypeString, "_HEAL%$") then
 						if string.match(params["spellId"], "arg(%d+)") then
@@ -346,10 +335,8 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 						end
 						amount = select(string.match(params["amount"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						over = select(string.match(params["overheal"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						absorbed = select(string.match(params["absorbed"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						critical = select(string.match(params["critical"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 
-						-- Ray of Hope & Death Pact bugs out
+						-- Ray of Hope & Death Pact bug out
 						if spellID == 197268 or 48743 then
 							amount = 0
 							over = 0
@@ -372,29 +359,11 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 								["spellID"] = spellID,
 								["spellSchool"] = spellSchool or 1,
 								["amount"] = amount,
-							--	["overkill"] = overkill,
-								["school"] = school,
-							--	["resisted"] = resisted,
-							--	["blocked"] = blocked,
-							--	["absorbed"] = ansorbed,
-							--	["critical"] = critical,
-							--	["glancing"] = glancing,
-							--	["crushing"] = crushing,
-							--	["isOffHand"] = isOffHand,
+								["overkill"] = overkill,
 							}
 						else
-						--	ns.data[mode][sourceName][module].spells[spellName].spellID = spellID
-						--	ns.data[mode][sourceName][module].spells[spellName].spellSchool = spellSchool
 							ns.data[mode][cLogName][module].spells[cLogSpell].amount = ns.data[mode][cLogName][module].spells[cLogSpell].amount + amount
-						--	ns.data[mode][sourceName][module].spells[spellName].overkill = overkill
-						--	ns.data[mode][sourceName][module].spells[spellName].school = school
-						--	ns.data[mode][sourceName][module].spells[spellName].resisted = resisted
-						--	ns.data[mode][sourceName][module].spells[spellName].blocked = blocked
-						--	ns.data[mode][sourceName][module].spells[spellName].absorbed = ansorbed
-						--	ns.data[mode][sourceName][module].spells[spellName].critical = critical
-						--	ns.data[mode][sourceName][module].spells[spellName].glancing = glancing
-						--	ns.data[mode][sourceName][module].spells[spellName].crushing = crushing
-						--	ns.data[mode][sourceName][module].spells[spellName].isOffHand = isOffHand
+							ns.data[mode][sourceName][module].spells[spellName].overkill = ns.data[mode][cLogName][module].spells[cLogSpell].overkill + overkill
 						end
 
 						-- Total amount of player (and pet)
@@ -548,7 +517,6 @@ function ns.checkDotsRunning()
 	local seconds = GetTime()
 	for name in pairs(ns.data.overall) do
 		if UnitExists(name) then
-		--print(seconds - lasttime)
 			if ((seconds - lasttime) < 5) then	
 				if not ns.contains(dotsRunning, name) then
 					table.insert(dotsRunning, name)
