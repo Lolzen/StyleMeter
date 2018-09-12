@@ -202,8 +202,10 @@ function eF.PLAYER_ENTERING_WORLD()
 	end
 end
 
+local prevent_reset = false
 function eF.PLAYER_REGEN_ENABLED()
 	-- Reset every current data if we leave battle
+	if prevent_reset == true then return end
 	for name in pairs(ns.data.current) do
 		if not ns.module[name] then
 			if ns.data.current[name] then
@@ -246,6 +248,47 @@ function eF.isThrottled(self, timeStamp)
 	end
 end
 
+-- Prevent resetting when out of combat, but still dots ticking
+local layoutIsUpdated = false
+local last_time = 0
+function eF.preventReset(time, bool)
+	if bool == true then
+		last_time = time
+	end
+	if time - last_time < 4 then
+		prevent_reset = true
+	else
+		if prevent_reset == true then
+			prevent_reset = false
+			layoutIsUpdated = false
+		end
+		if prevent_reset == false then
+			if layoutIsUpdated == true then return end
+			if ns.UpdateLayout then
+				-- we have to update the Layout twice, else the display isn't displayed correctly
+				ns:UpdateLayout()
+				ns:UpdateLayout()
+			end
+			layoutIsUpdated = true
+		end
+	end
+end
+
+-- We need a timer running so eF.preventReset() is called outside of COMBAT_LOG_EVENT_UNFILTERED and the Layout is actually updated
+-- the layout update is not continous, however with built-in checks to prevent unnecessary calls
+ns.timer = eF:CreateAnimationGroup()
+ns.timerAnim = ns.timer:CreateAnimation()
+ns.timerAnim:SetDuration(0.1)
+local counter = 0
+ns.timer:SetScript("OnFinished", function(self, requested)
+	-- limit continous updating to Hybrid mode only, as this is the only mode which needs updating OOC once
+	if ns.activeModule == "Hybrid" then
+		eF.preventReset(GetTime(), false)
+	end
+	self:Play()
+end)
+ns.timer:Play()
+
 function eF.getClogName(self, guid)
 	return ns.DB.guids[guid].name
 end
@@ -284,10 +327,10 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 			end
 		end
 	end
-	
+
 	if ns.DB.guids[sourceGUID] then
 		local cLogName = eF:getClogName(sourceGUID)
-		
+
 		for module, vars in pairs(ns.module) do
 			-- eventTypeString = eg "SPELL_DAMAGE_PERIODIC"	
 			for eventTypeString, params in pairs(vars) do
@@ -333,12 +376,12 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 							spellSchool = params["spellSchool"]
 						end
 						amount = select(string.match(params["amount"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
-						over = select(string.match(params["overheal"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
+--						over = select(string.match(params["overheal"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 
 						-- Ray of Hope & Death Pact bug out
 						if spellID == 197268 or 48743 then
 							amount = 0
-							over = 0
+--							over = 0
 						end
 					end
 
@@ -358,11 +401,11 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 								["spellID"] = spellID,
 								["spellSchool"] = spellSchool or 1,
 								["amount"] = amount,
-								["overkill"] = over,
+--								["overkill"] = over or 0,
 							}
 						else
 							ns.data[mode][cLogName][module].spells[cLogSpell].amount = ns.data[mode][cLogName][module].spells[cLogSpell].amount + amount
-							ns.data[mode][sourceName][module].spells[spellName].overkill = ns.data[mode][cLogName][module].spells[cLogSpell].overkill + overkill
+--							ns.data[mode][sourceName][module].spells[spellName].overkill = ns.data[mode][cLogName][module].spells[cLogSpell].overkill + over or 0
 						end
 
 						-- Total amount of player (and pet)
@@ -384,6 +427,8 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 							ns.data[mode][module] = ns.data[mode][module] + amount
 						end
 					end
+
+					eF.preventReset(GetTime(), true)
 
 					-- Update the layout
 					if ns.UpdateLayout and eF:isThrottled(timeStamp) == false then
@@ -490,48 +535,23 @@ end
 -- Determine if any partymember is in Combat
 local inCombat = {}
 function ns.checkPartyCombat()
-	for name in pairs(ns.data.current) do
+	for name in pairs(ns.data.overall) do
 		if UnitExists(name) then
-			if UnitAffectingCombat(name) then	
+			if UnitAffectingCombat(name) or prevent_reset == true then
 				if not ns.contains(inCombat, name) then
 					table.insert(inCombat, name)
 				end
 			else
+				ns.resetCurData()
 				if ns.contains(inCombat, name) then
 					table.remove(inCombat, ns.tablefind(inCombat, name))
 				end
-			end		
+			end
 		end
 	end
 	if table.getn(inCombat) > 0 then
 		return true
 	else
-		return false
-	end
-end
-
-local dotsRunning = {}
-local lasttime = 0
-function ns.checkDotsRunning()
-	local seconds = GetTime()
-	for name in pairs(ns.data.overall) do
-		if UnitExists(name) then
-			if ((seconds - lasttime) < 5) then	
-				if not ns.contains(dotsRunning, name) then
-					table.insert(dotsRunning, name)
-				end
-			else
-				if ns.contains(dotsRunning, name) then
-					table.remove(dotsRunning, ns.tablefind(dotsRunning, name))
-				end
-			end		
-			lasttime = GetTime()
-		end
-	end
-	if table.getn(dotsRunning) > 0 then
-		return true
-	else
-		ns:resetCurData()
 		return false
 	end
 end
@@ -565,15 +585,9 @@ function ns.getModeData(num)
 		elseif ns.activeMode == "Overall" then
 			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 		elseif ns.activeMode == "Hybrid" then
-			--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
 			if ns.checkPartyCombat() == true then
 				return ns.data.current[ns.DB.rank[num]][ns.activeModule].total, ns.data.current[ns.activeModule]
 			else
-				--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
-				--	ns.resetCurData()
-				--end
-				-- call ns.sortRank so the display is not borked
-				--ns.sortRank()
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].total, ns.data.overall[ns.activeModule]
 			end
 		end
@@ -590,7 +604,6 @@ function ns.getTimeAndSpells(num)
 			return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
 		elseif ns.activeMode == "Hybrid" then
 			if ns.checkPartyCombat() == true then
-			--if (ns.data.current[ns.activeModule] and ns.data.current[ns.activeModule] > 0) then
 				return ns.data.current[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.current[ns.DB.rank[num]][ns.activeModule].spells
 			else
 				return ns.data.overall[ns.DB.rank[num]][ns.activeModule].combatTime, ns.data.overall[ns.DB.rank[num]][ns.activeModule].spells
