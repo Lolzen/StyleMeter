@@ -261,8 +261,7 @@ function eF.preventReset(time, bool)
 		if prevent_reset == true then
 			prevent_reset = false
 			layoutIsUpdated = false
-		end
-		if prevent_reset == false then
+		elseif prevent_reset == false then
 			if layoutIsUpdated == true then return end
 			if ns.UpdateLayout then
 				-- we have to update the Layout twice, else the display isn't displayed correctly
@@ -282,7 +281,7 @@ ns.timerAnim:SetDuration(0.1)
 local counter = 0
 ns.timer:SetScript("OnFinished", function(self, requested)
 	-- limit continous updating to Hybrid mode only, as this is the only mode which needs updating OOC once
-	if ns.activeModule == "Hybrid" then
+	if ns.activeMode == "Hybrid" then
 		eF.preventReset(GetTime(), false)
 	end
 	self:Play()
