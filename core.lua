@@ -340,6 +340,9 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 					local spellID, spellName, spellSchool, amount, over
 					-- Damage
 					if string.find(eventTypeString, "_DAMAGE") then
+						-- prevent self harming abilities like Burning Rush to "cheat"
+						if sourceName == destName then return end
+
 						if string.match(params["spellId"], "arg(%d+)") then
 							spellID = select(string.match(params["spellId"], "arg(%d+)"), CombatLogGetCurrentEventInfo())
 						else
@@ -391,7 +394,7 @@ function eF.COMBAT_LOG_EVENT_UNFILTERED(self, event)
 					elseif unitType == "Pet" or "Creature" then
 						cLogSpell = sourceName
 					end
-					
+
 					for mode in pairs(ns.data) do
 						-- Add values to ns.data					
 						-- Fill in the spellNames in ns.data[mode][sourceName][module].spells and create the keys
