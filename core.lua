@@ -264,8 +264,6 @@ function eF.preventReset(time, bool)
 		elseif prevent_reset == false then
 			if layoutIsUpdated == true then return end
 			if ns.UpdateLayout then
-				-- we have to update the Layout twice, else the display isn't displayed correctly
-				ns:UpdateLayout()
 				ns:UpdateLayout()
 			end
 			layoutIsUpdated = true
